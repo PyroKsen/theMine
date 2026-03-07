@@ -17,6 +17,7 @@ export default function App() {
   const [form, setForm] = useState({ username: "", password: "" });
   const [status, setStatus] = useState("idle");
   const [error, setError] = useState("");
+  const [tipsOpen, setTipsOpen] = useState(false);
 
   const serverHttp =
     import.meta.env.VITE_SERVER_HTTP_URL || "http://localhost:8080";
@@ -69,11 +70,20 @@ export default function App() {
       <header className="app-header">
         <div className="app-title">theMine</div>
         <div className="app-subtitle">{subtitle}</div>
-        {isAuthed ? (
-          <button className="ghost-btn" onClick={logout} type="button">
-            Sign out
+        <div className="header-actions">
+          <button
+            className="ghost-btn"
+            onClick={() => setTipsOpen(true)}
+            type="button"
+          >
+            Tips
           </button>
-        ) : null}
+          {isAuthed ? (
+            <button className="ghost-btn" onClick={logout} type="button">
+              Sign out
+            </button>
+          ) : null}
+        </div>
       </header>
       <div className="app-content">
         {isAuthed ? (
@@ -155,6 +165,30 @@ export default function App() {
           </div>
         )}
       </div>
+      {tipsOpen ? (
+        <div className="modal-backdrop" onClick={() => setTipsOpen(false)}>
+          <div
+            className="modal-card"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="modal-title">Tips</div>
+            <div className="modal-body">
+              <div>Move: WASD or Arrow keys</div>
+              <div>Rotate in place: Ctrl + WASD</div>
+              <div>Mine: Z</div>
+              <div>Use selected item: F</div>
+              <div>World map: M (close with M or Esc)</div>
+            </div>
+            <button
+              className="primary-btn modal-close"
+              type="button"
+              onClick={() => setTipsOpen(false)}
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

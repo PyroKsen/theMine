@@ -1,8 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Application, Container, Graphics, Text } from "pixi.js";
 
-const DEFAULT_MAP = { w: 50, h: 50, tile: 32 };
+const DEFAULT_MAP = { w: 1000, h: 1000, tile: 32, chunk: 64 };
 const INTERPOLATION_DELAY = 100; // ms
+const CAMERA_ZOOM = 0.8;
+const VIEW_RADIUS_TILES = 128;
 
 const COLORS = {
   background: 0x0b1016,
@@ -15,6 +17,24 @@ const COLORS = {
   playerSelf: 0x53f5a5
 };
 
+const SHOP_ITEMS = [
+  { id: "green", name: "Green", price: 8, className: "crystal-green-text" },
+  { id: "blue", name: "Blue", price: 12, className: "crystal-blue-text" },
+  { id: "white", name: "White", price: 20, className: "crystal-white-text" },
+  { id: "red", name: "Red", price: 15, className: "crystal-red-text" },
+  { id: "pink", name: "Pink", price: 40, className: "crystal-pink-text" },
+  { id: "cyan", name: "Cyan", price: 60, className: "crystal-cyan-text" }
+];
+
+const STORAGE_ITEMS = [
+  { id: "green", name: "Green", className: "crystal-green-text" },
+  { id: "blue", name: "Blue", className: "crystal-blue-text" },
+  { id: "white", name: "White", className: "crystal-white-text" },
+  { id: "red", name: "Red", className: "crystal-red-text" },
+  { id: "pink", name: "Pink", className: "crystal-pink-text" },
+  { id: "cyan", name: "Cyan", className: "crystal-cyan-text" }
+];
+
 const TILE_TYPES = {
   empty: 0,
   rock: 1,
@@ -23,7 +43,9 @@ const TILE_TYPES = {
   crystalWhite: 4,
   crystalRed: 5,
   crystalPink: 6,
-  crystalCyan: 7
+  crystalCyan: 7,
+  blackRock: 8,
+  redRock: 9
 };
 
 function crystalColor(type) {
@@ -56,6 +78,11 @@ function lerp(a, b, t) {
   return a + (b - a) * t;
 }
 
+function smoothTowards(current, target, dtMs, smoothMs) {
+  const alpha = 1 - Math.exp(-dtMs / smoothMs);
+  return current + (target - current) * alpha;
+}
+
 export default function GameView({ token, onAuthExpired }) {
   const containerRef = useRef(null);
   const mapWrapRef = useRef(null);
@@ -64,11 +91,27 @@ export default function GameView({ token, onAuthExpired }) {
   const mapOpenRef = useRef(false);
   const socketRef = useRef(null);
   const chatFocusRef = useRef(false);
+  const placementRef = useRef({ x: null, y: null, valid: false });
+  const loadedChunksRef = useRef(new Set());
+  const exploredChunksRef = useRef(new Set());
+  const hydrateCacheRef = useRef(null);
+  const usernameRef = useRef("");
+  const chunkRequestTimeRef = useRef(new Map());
+  const localPlayerRef = useRef({
+    tx: 0,
+    ty: 0,
+    fx: 0,
+    fy: 1,
+    ready: false
+  });
+  const buildingsRef = useRef([]);
   const mapViewRef = useRef({ zoom: 1, panX: 0, panY: 0, lastX: 0, lastY: 0 });
   const mapDataRef = useRef({
     w: DEFAULT_MAP.w,
     h: DEFAULT_MAP.h,
-    tiles: null,
+    chunk: DEFAULT_MAP.chunk,
+    tiles: new Map(),
+    buildings: new Map(),
     players: new Map(),
     playerId: null
   });
@@ -86,15 +129,151 @@ export default function GameView({ token, onAuthExpired }) {
     pink: 0,
     cyan: 0
   });
+  const [itemInventory, setItemInventory] = useState([
+    { id: "medkit", name: "Medkit", count: 0 },
+    { id: "bomb", name: "Bomb", count: 0 },
+    { id: "plasmabomb", name: "Plasmabomb", count: 0 },
+    { id: "electrobomb", name: "Electrobomb", count: 0 },
+    { id: "storage", name: "Склад", count: 0 },
+    { id: "shop", name: "Магазин", count: 0 },
+    { id: "respawn", name: "Респавн", count: 0 },
+    { id: "upgrade", name: "Ап", count: 0 },
+    { id: "turret", name: "Пушка", count: 0 },
+    { id: "clan_hall", name: "Клановое здание", count: 0 }
+  ]);
+  const [selectedItemId, setSelectedItemId] = useState(null);
+  const selectedItemRef = useRef(null);
   const [chatMessages, setChatMessages] = useState([]);
   const [chatInput, setChatInput] = useState("");
   const [chatFocused, setChatFocused] = useState(false);
+  const [chatOpen, setChatOpen] = useState(true);
   const [mapOpen, setMapOpen] = useState(false);
   const [mapPanning, setMapPanning] = useState(false);
+  const [storageOpen, setStorageOpen] = useState(false);
+  const [shopOpen, setShopOpen] = useState(false);
+  const [shopTab, setShopTab] = useState("sell");
+  const [storageTab, setStorageTab] = useState("storage");
+  const [storageOwner, setStorageOwner] = useState(null);
+  const [shopOwner, setShopOwner] = useState(null);
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const [upgradeOwner, setUpgradeOwner] = useState(null);
+  const [upgradeTab, setUpgradeTab] = useState("upgrade");
+  const [storageId, setStorageId] = useState(null);
+  const storageIdRef = useRef(null);
+  const [storageState, setStorageState] = useState({
+    green: 0,
+    blue: 0,
+    white: 0,
+    red: 0,
+    pink: 0,
+    cyan: 0
+  });
+  const [storageTransfer, setStorageTransfer] = useState({
+    green: 0,
+    blue: 0,
+    white: 0,
+    red: 0,
+    pink: 0,
+    cyan: 0
+  });
+  const [shopSell, setShopSell] = useState({
+    green: 0,
+    blue: 0,
+    white: 0,
+    red: 0,
+    pink: 0,
+    cyan: 0
+  });
+  const [shopBuy, setShopBuy] = useState({
+    green: 0,
+    blue: 0,
+    white: 0,
+    red: 0,
+    pink: 0,
+    cyan: 0
+  });
+
+  const sortedItems = itemInventory
+    .map((item, index) => ({ ...item, index }))
+    .sort((a, b) => {
+      const aHas = a.count > 0 ? 1 : 0;
+      const bHas = b.count > 0 ? 1 : 0;
+      if (aHas !== bHas) return bHas - aHas;
+      return a.index - b.index;
+    });
   const [mapHover, setMapHover] = useState({ x: null, y: null, inside: false });
 
   function clamp(value, min, max) {
     return Math.max(min, Math.min(max, value));
+  }
+
+  function chunkKey(cx, cy) {
+    return `${cx},${cy}`;
+  }
+
+  function chunkStorageKey(cx, cy) {
+    const user = usernameRef.current || "guest";
+    return `themine:${user}:chunk:${cx},${cy}`;
+  }
+
+  function saveChunkCache(cx, cy, tiles, buildings) {
+    try {
+      localStorage.setItem(
+        chunkStorageKey(cx, cy),
+        JSON.stringify({ tiles, buildings })
+      );
+    } catch {
+      // ignore storage errors
+    }
+  }
+
+  function loadChunkCache(cx, cy) {
+    try {
+      const raw = localStorage.getItem(chunkStorageKey(cx, cy));
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (!parsed?.tiles || !parsed?.buildings) return null;
+      return parsed;
+    } catch {
+      return null;
+    }
+  }
+
+  function decodeBase64(base64) {
+    const binary = window.atob(base64 || "");
+    const len = binary.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i += 1) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes;
+  }
+
+  function requestChunks(chunks, options = {}) {
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) return;
+    const { w, h, chunk } = mapDataRef.current;
+    if (!chunk) return;
+    const force = Boolean(options.force);
+    const maxCx = Math.ceil(w / chunk) - 1;
+    const maxCy = Math.ceil(h / chunk) - 1;
+    const pending = [];
+    for (const entry of chunks) {
+      const cx = Number(entry.cx);
+      const cy = Number(entry.cy);
+      if (!Number.isFinite(cx) || !Number.isFinite(cy)) continue;
+      if (cx < 0 || cy < 0 || cx > maxCx || cy > maxCy) continue;
+      const key = chunkKey(cx, cy);
+      if (!force && loadedChunksRef.current.has(key)) continue;
+      pending.push({ cx, cy });
+      if (pending.length >= 32) {
+        socket.send(JSON.stringify({ t: "map_chunk_req", chunks: pending }));
+        pending.length = 0;
+      }
+    }
+    if (pending.length > 0) {
+      socket.send(JSON.stringify({ t: "map_chunk_req", chunks: pending }));
+    }
   }
 
   function requestMapDraw() {
@@ -104,6 +283,30 @@ export default function GameView({ token, onAuthExpired }) {
       mapDrawRafRef.current = null;
       drawWorldMap();
     });
+  }
+
+  function isTileWithinView(tx, ty) {
+    const player = localPlayerRef.current;
+    if (!player.ready) return false;
+    const dx = tx - player.tx;
+    const dy = ty - player.ty;
+    return dx * dx + dy * dy <= VIEW_RADIUS_TILES * VIEW_RADIUS_TILES;
+  }
+
+  function chunkIntersectsView(cx, cy) {
+    const player = localPlayerRef.current;
+    if (!player.ready) return false;
+    const { w, h, chunk } = mapDataRef.current;
+    const chunkSize = chunk || DEFAULT_MAP.chunk;
+    const x0 = cx * chunkSize;
+    const y0 = cy * chunkSize;
+    const x1 = Math.min(x0 + chunkSize - 1, w - 1);
+    const y1 = Math.min(y0 + chunkSize - 1, h - 1);
+    const nx = clamp(player.tx, x0, x1);
+    const ny = clamp(player.ty, y0, y1);
+    const dx = player.tx - nx;
+    const dy = player.ty - ny;
+    return dx * dx + dy * dy <= VIEW_RADIUS_TILES * VIEW_RADIUS_TILES;
   }
 
   function drawWorldMap() {
@@ -124,7 +327,15 @@ export default function GameView({ token, onAuthExpired }) {
 
     ctx.clearRect(0, 0, width, height);
 
-    const { w, h, tiles, players, playerId } = mapDataRef.current;
+    const {
+      w,
+      h,
+      chunk: chunkSize,
+      tiles,
+      buildings,
+      players,
+      playerId
+    } = mapDataRef.current;
     if (!w || !h) return;
     const baseScale = Math.min(width / w, height / h);
     const zoom = mapViewRef.current.zoom;
@@ -138,34 +349,77 @@ export default function GameView({ token, onAuthExpired }) {
     ctx.fillRect(originX, originY, w * scale, h * scale);
 
     if (tiles) {
-      for (let y = 0; y < h; y += 1) {
-        const row = tiles[y];
-        if (!row) continue;
-        for (let x = 0; x < w; x += 1) {
-          const type = row[x];
-          let color = null;
-          if (type === TILE_TYPES.rock) color = "#2b0f4d";
-          if (type === TILE_TYPES.crystalGreen) color = "#38d86b";
-          if (type === TILE_TYPES.crystalBlue) color = "#4da3ff";
-          if (type === TILE_TYPES.crystalWhite) color = "#f0f4ff";
-          if (type === TILE_TYPES.crystalRed) color = "#ff5d5d";
-          if (type === TILE_TYPES.crystalPink) color = "#ff7fd6";
-          if (type === TILE_TYPES.crystalCyan) color = "#5ee9ff";
-          if (color) {
-            ctx.fillStyle = color;
-            ctx.fillRect(
-              originX + x * scale,
-              originY + y * scale,
-              scale,
-              scale
-            );
+      for (const chunk of tiles.values()) {
+        const startX = chunk.cx * chunkSize;
+        const startY = chunk.cy * chunkSize;
+        for (let y = 0; y < chunk.h; y += 1) {
+          for (let x = 0; x < chunk.w; x += 1) {
+            const type = chunk.data[y * chunk.w + x];
+            let color = null;
+            if (type === TILE_TYPES.rock) color = "#2b0f4d";
+            if (type === TILE_TYPES.crystalGreen) color = "#38d86b";
+            if (type === TILE_TYPES.crystalBlue) color = "#4da3ff";
+            if (type === TILE_TYPES.crystalWhite) color = "#f0f4ff";
+            if (type === TILE_TYPES.crystalRed) color = "#ff5d5d";
+            if (type === TILE_TYPES.crystalPink) color = "#ff7fd6";
+            if (type === TILE_TYPES.crystalCyan) color = "#5ee9ff";
+            if (type === TILE_TYPES.blackRock) color = "#0b0b0f";
+            if (type === TILE_TYPES.redRock) color = "#7a0f0f";
+            if (color) {
+              ctx.fillStyle = color;
+              ctx.fillRect(
+                originX + (startX + x) * scale,
+                originY + (startY + y) * scale,
+                scale,
+                scale
+              );
+            }
           }
         }
       }
     }
 
+    if (buildings) {
+      ctx.fillStyle = "#c8ced9";
+      for (const chunk of buildings.values()) {
+        const startX = chunk.cx * chunkSize;
+        const startY = chunk.cy * chunkSize;
+        for (let y = 0; y < chunk.h; y += 1) {
+          for (let x = 0; x < chunk.w; x += 1) {
+            if (chunk.data[y * chunk.w + x]) {
+              ctx.fillRect(
+                originX + (startX + x) * scale,
+                originY + (startY + y) * scale,
+                scale,
+                scale
+              );
+            }
+          }
+        }
+      }
+    }
+
+    const maxCx = Math.ceil(w / chunkSize);
+    const maxCy = Math.ceil(h / chunkSize);
+    ctx.fillStyle = "#000000";
+    for (let cy = 0; cy < maxCy; cy += 1) {
+      for (let cx = 0; cx < maxCx; cx += 1) {
+        if (exploredChunksRef.current.has(chunkKey(cx, cy))) continue;
+        const startX = cx * chunkSize * scale + originX;
+        const startY = cy * chunkSize * scale + originY;
+        const width = Math.min(chunkSize, w - cx * chunkSize) * scale;
+        const height = Math.min(chunkSize, h - cy * chunkSize) * scale;
+        ctx.fillRect(startX, startY, width, height);
+      }
+    }
+
     const radius = Math.max(2, Math.min(6, scale * 0.4));
+    const player = localPlayerRef.current;
     for (const [id, p] of players.entries()) {
+      if (!player.ready) continue;
+      const dx = p.tx - player.tx;
+      const dy = p.ty - player.ty;
+      if (dx * dx + dy * dy > VIEW_RADIUS_TILES * VIEW_RADIUS_TILES) continue;
       const px = originX + (p.tx + 0.5) * scale;
       const py = originY + (p.ty + 0.5) * scale;
       ctx.beginPath();
@@ -287,6 +541,9 @@ export default function GameView({ token, onAuthExpired }) {
       mapViewRef.current.zoom = 1;
       mapViewRef.current.panX = 0;
       mapViewRef.current.panY = 0;
+      if (hydrateCacheRef.current) {
+        hydrateCacheRef.current();
+      }
       requestMapDraw();
     } else {
       setMapPanning(false);
@@ -297,12 +554,178 @@ export default function GameView({ token, onAuthExpired }) {
     chatFocusRef.current = chatFocused;
   }, [chatFocused]);
 
+  function updateBuildingWindows() {
+    const player = localPlayerRef.current;
+    if (!player.ready) {
+      setStorageOpen(false);
+      setShopOpen(false);
+      setStorageId(null);
+      setStorageOwner(null);
+      setShopOwner(null);
+      setUpgradeOpen(false);
+      setUpgradeOwner(null);
+      return;
+    }
+    let insideStorage = false;
+    let currentStorageId = null;
+    let currentStorageOwner = null;
+    let insideShop = false;
+    let currentShopOwner = null;
+    let insideUpgrade = false;
+    let currentUpgradeOwner = null;
+    for (const building of buildingsRef.current) {
+      if (building.type === "storage" && building.entrance) {
+        if (
+          building.entrance.x === player.tx &&
+          building.entrance.y === player.ty
+        ) {
+          const owner = building.owner || "";
+          const me = usernameRef.current || "";
+          if (!owner || owner === me) {
+            insideStorage = true;
+            currentStorageId = building.id || null;
+            currentStorageOwner = owner || null;
+          }
+        }
+      }
+      if (building.type === "shop") {
+        if (
+          building.center &&
+          building.center.x === player.tx &&
+          building.center.y === player.ty
+        ) {
+          insideShop = true;
+          currentShopOwner = building.owner || null;
+        }
+      }
+      if (building.type === "upgrade") {
+        if (
+          building.center &&
+          building.center.x === player.tx &&
+          building.center.y === player.ty
+        ) {
+          insideUpgrade = true;
+          currentUpgradeOwner = building.owner || null;
+        }
+      }
+    }
+    setStorageOpen(insideStorage);
+    setShopOpen(insideShop);
+    setStorageId(insideStorage ? currentStorageId : null);
+    setStorageOwner(insideStorage ? currentStorageOwner : null);
+    setShopOwner(insideShop ? currentShopOwner : null);
+    setUpgradeOpen(insideUpgrade);
+    setUpgradeOwner(insideUpgrade ? currentUpgradeOwner : null);
+  }
+
+  useEffect(() => {
+    selectedItemRef.current = selectedItemId;
+  }, [selectedItemId]);
+
+  useEffect(() => {
+    storageIdRef.current = storageId;
+  }, [storageId]);
+
+  useEffect(() => {
+    setShopSell((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const item of SHOP_ITEMS) {
+        const max = Number(inventory[item.id] || 0);
+        const current = Number(prev[item.id] || 0);
+        const clamped = Math.max(0, Math.min(current, max));
+        if (clamped !== current) {
+          next[item.id] = clamped;
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [inventory]);
+
+  function applyItems(items) {
+    let next = [];
+    setItemInventory((prev) => {
+      const nameMap = new Map(prev.map((item) => [item.id, item.name]));
+      next = items.map((item) => ({
+        id: String(item.id || ""),
+        name: nameMap.get(String(item.id || "")) || String(item.name || ""),
+        count: Number(item.count || 0)
+      }));
+      return next;
+    });
+    setSelectedItemId((prev) => {
+      if (!prev) return null;
+      const found = next.find((item) => item.id === prev);
+      if (!found || found.count <= 0) return null;
+      return prev;
+    });
+  }
+
   useEffect(() => {
     if (!mapOpen) return undefined;
     const handleResize = () => requestMapDraw();
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
   }, [mapOpen]);
+
+  useEffect(() => {
+    if (!storageOpen || !storageId) return;
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) return;
+    socket.send(JSON.stringify({ t: "storage_open", id: storageId }));
+  }, [storageOpen, storageId]);
+
+  useEffect(() => {
+    if (storageOpen) return;
+    setStorageState({
+      green: 0,
+      blue: 0,
+      white: 0,
+      red: 0,
+      pink: 0,
+      cyan: 0
+    });
+    setStorageTransfer({
+      green: 0,
+      blue: 0,
+      white: 0,
+      red: 0,
+      pink: 0,
+      cyan: 0
+    });
+    setStorageTab("storage");
+    return;
+  }, [storageOpen]);
+
+  useEffect(() => {
+    const me = usernameRef.current || "";
+    if (storageOpen && storageTab === "manage" && storageOwner !== me) {
+      setStorageTab("storage");
+    }
+  }, [storageOpen, storageTab, storageOwner]);
+
+  useEffect(() => {
+    if (!shopOpen) {
+      setShopTab("sell");
+      return;
+    }
+    const me = usernameRef.current || "";
+    if (shopTab === "manage" && shopOwner !== me) {
+      setShopTab("sell");
+    }
+  }, [shopOpen, shopTab, shopOwner]);
+
+  useEffect(() => {
+    if (!upgradeOpen) {
+      setUpgradeTab("upgrade");
+      return;
+    }
+    const me = usernameRef.current || "";
+    if (upgradeTab === "manage" && upgradeOwner !== me) {
+      setUpgradeTab("upgrade");
+    }
+  }, [upgradeOpen, upgradeTab, upgradeOwner]);
 
   useEffect(() => {
     if (!token) return undefined;
@@ -313,11 +736,16 @@ export default function GameView({ token, onAuthExpired }) {
     let gridLines;
     let terrain;
     let effectsLayer;
+    let bombsLayer;
+    let placementLayer;
+    let buildingLayer;
     let playersLayer;
+    const camera = { x: 0, y: 0, ready: false };
     let resizeObserver;
     let socket;
     let inputInterval;
     const effects = [];
+    const bombs = new Map();
 
     const state = {
       playerId: null,
@@ -334,6 +762,142 @@ export default function GameView({ token, onAuthExpired }) {
         mine: false
       }
     };
+    const terrainChunks = new Map();
+    const buildingChunks = new Map();
+
+    function storeChunk(map, cx, cy, w, h, data) {
+      const key = chunkKey(cx, cy);
+      map.set(key, { cx, cy, w, h, data });
+    }
+
+    function clearChunkGraphics(chunks, layer) {
+      for (const graphic of chunks.values()) {
+        layer.removeChild(graphic);
+        graphic.destroy();
+      }
+      chunks.clear();
+    }
+
+    function drawTerrainChunk(cx, cy) {
+      const key = chunkKey(cx, cy);
+      const chunk = mapDataRef.current.tiles.get(key);
+      if (!chunk || !terrain) return;
+      let graphic = terrainChunks.get(key);
+      if (!graphic) {
+        graphic = new Graphics();
+        terrainChunks.set(key, graphic);
+        terrain.addChild(graphic);
+      }
+      graphic.clear();
+      const { tile } = state.map;
+      const chunkSize = state.map.chunk || DEFAULT_MAP.chunk;
+      const originX = cx * chunkSize * tile;
+      const originY = cy * chunkSize * tile;
+      for (let y = 0; y < chunk.h; y += 1) {
+        for (let x = 0; x < chunk.w; x += 1) {
+          const type = chunk.data[y * chunk.w + x];
+          let color = null;
+          if (type === TILE_TYPES.rock) color = COLORS.rock;
+          if (type === TILE_TYPES.crystalGreen) color = 0x38d86b;
+          if (type === TILE_TYPES.crystalBlue) color = 0x4da3ff;
+          if (type === TILE_TYPES.crystalWhite) color = 0xf0f4ff;
+          if (type === TILE_TYPES.crystalRed) color = 0xff5d5d;
+          if (type === TILE_TYPES.crystalPink) color = 0xff7fd6;
+          if (type === TILE_TYPES.crystalCyan) color = 0x5ee9ff;
+          if (type === TILE_TYPES.blackRock) color = 0x0b0b0f;
+          if (type === TILE_TYPES.redRock) color = 0x7a0f0f;
+          if (color !== null) {
+            graphic.beginFill(color);
+            graphic.drawRect(
+              originX + x * tile,
+              originY + y * tile,
+              tile,
+              tile
+            );
+            graphic.endFill();
+          }
+        }
+      }
+    }
+
+    function drawBuildingChunk(cx, cy) {
+      const key = chunkKey(cx, cy);
+      const chunk = mapDataRef.current.buildings.get(key);
+      if (!chunk || !buildingLayer) return;
+      let graphic = buildingChunks.get(key);
+      if (!graphic) {
+        graphic = new Graphics();
+        buildingChunks.set(key, graphic);
+        buildingLayer.addChild(graphic);
+      }
+      graphic.clear();
+      const { tile } = state.map;
+      const chunkSize = state.map.chunk || DEFAULT_MAP.chunk;
+      const originX = cx * chunkSize * tile;
+      const originY = cy * chunkSize * tile;
+      graphic.beginFill(0xc8ced9, 0.85);
+      for (let y = 0; y < chunk.h; y += 1) {
+        for (let x = 0; x < chunk.w; x += 1) {
+          if (chunk.data[y * chunk.w + x]) {
+            graphic.drawRect(
+              originX + x * tile,
+              originY + y * tile,
+              tile,
+              tile
+            );
+          }
+        }
+      }
+      graphic.endFill();
+    }
+
+    function setChunkValue(map, x, y, value) {
+      const chunkSize = state.map.chunk || DEFAULT_MAP.chunk;
+      const cx = Math.floor(x / chunkSize);
+      const cy = Math.floor(y / chunkSize);
+      const key = chunkKey(cx, cy);
+      const chunk = map.get(key);
+      if (!chunk) return null;
+      const lx = x - cx * chunkSize;
+      const ly = y - cy * chunkSize;
+      if (lx < 0 || ly < 0 || lx >= chunk.w || ly >= chunk.h) return null;
+      chunk.data[ly * chunk.w + lx] = value;
+      return { cx, cy };
+    }
+
+    function hydrateExploredCache() {
+      const chunkSize = state.map.chunk || DEFAULT_MAP.chunk;
+      const { w, h } = mapDataRef.current;
+      for (const key of exploredChunksRef.current) {
+        if (loadedChunksRef.current.has(key)) continue;
+        const parts = key.split(",");
+        const cx = Number(parts[0]);
+        const cy = Number(parts[1]);
+        if (!Number.isFinite(cx) || !Number.isFinite(cy)) continue;
+        const cached = loadChunkCache(cx, cy);
+        if (!cached) continue;
+        const chunkW = Math.min(chunkSize, w - cx * chunkSize);
+        const chunkH = Math.min(chunkSize, h - cy * chunkSize);
+        if (chunkW <= 0 || chunkH <= 0) continue;
+        const tiles = decodeBase64(cached.tiles);
+        const buildings = decodeBase64(cached.buildings);
+        storeChunk(mapDataRef.current.tiles, cx, cy, chunkW, chunkH, tiles);
+        storeChunk(
+          mapDataRef.current.buildings,
+          cx,
+          cy,
+          chunkW,
+          chunkH,
+          buildings
+        );
+        loadedChunksRef.current.add(key);
+        drawTerrainChunk(cx, cy);
+        drawBuildingChunk(cx, cy);
+      }
+      requestMapDraw();
+    }
+
+    hydrateCacheRef.current = hydrateExploredCache;
 
     function drawGrid() {
       const { w, h, tile } = state.map;
@@ -354,27 +918,280 @@ export default function GameView({ token, onAuthExpired }) {
     }
 
     function drawTerrain() {
-      const { w, h, tile, tiles } = state.map;
-      terrain.clear();
-      if (!tiles) return;
-      for (let y = 0; y < h; y += 1) {
-        for (let x = 0; x < w; x += 1) {
-          const type = tiles[y]?.[x];
-          let color = null;
-          if (type === TILE_TYPES.rock) color = COLORS.rock;
-          if (type === TILE_TYPES.crystalGreen) color = 0x38d86b;
-          if (type === TILE_TYPES.crystalBlue) color = 0x4da3ff;
-          if (type === TILE_TYPES.crystalWhite) color = 0xf0f4ff;
-          if (type === TILE_TYPES.crystalRed) color = 0xff5d5d;
-          if (type === TILE_TYPES.crystalPink) color = 0xff7fd6;
-          if (type === TILE_TYPES.crystalCyan) color = 0x5ee9ff;
-          if (color !== null) {
-            terrain.beginFill(color);
-            terrain.drawRect(x * tile, y * tile, tile, tile);
-            terrain.endFill();
+      clearChunkGraphics(terrainChunks, terrain);
+    }
+
+    function drawBuildings() {
+      if (!buildingLayer) return;
+      clearChunkGraphics(buildingChunks, buildingLayer);
+    }
+
+    function isCellEmpty(tx, ty) {
+      const chunkSize = state.map.chunk || DEFAULT_MAP.chunk;
+      const cx = Math.floor(tx / chunkSize);
+      const cy = Math.floor(ty / chunkSize);
+      const key = chunkKey(cx, cy);
+      const tileChunk = mapDataRef.current.tiles.get(key);
+      const buildingChunk = mapDataRef.current.buildings.get(key);
+      if (!tileChunk || !buildingChunk) return false;
+      const lx = tx - cx * chunkSize;
+      const ly = ty - cy * chunkSize;
+      if (lx < 0 || ly < 0 || lx >= tileChunk.w || ly >= tileChunk.h)
+        return false;
+      if (tileChunk.data[ly * tileChunk.w + lx] !== TILE_TYPES.empty)
+        return false;
+      if (buildingChunk.data[ly * buildingChunk.w + lx]) return false;
+      return !bombs.has(`${tx},${ty}`);
+    }
+
+    function isBombSelected() {
+      const id = selectedItemRef.current;
+      return id === "bomb" || id === "plasmabomb";
+    }
+
+    function isStorageSelected() {
+      return selectedItemRef.current === "storage";
+    }
+
+    function isShopSelected() {
+      return selectedItemRef.current === "shop";
+    }
+
+    function isUpgradeSelected() {
+      return selectedItemRef.current === "upgrade";
+    }
+
+    function isBuildingSelected() {
+      return isStorageSelected() || isShopSelected() || isUpgradeSelected();
+    }
+
+    function getFrontTile() {
+      const player = localPlayerRef.current;
+      if (!player.ready) return null;
+      const tx = player.tx + player.fx;
+      const ty = player.ty + player.fy;
+      if (tx < 0 || tx >= state.map.w || ty < 0 || ty >= state.map.h) {
+        return null;
+      }
+      return { x: tx, y: ty };
+    }
+
+    function updatePlacement() {
+      const placement = placementRef.current;
+      if (mapOpenRef.current || (!isBombSelected() && !isBuildingSelected())) {
+        placement.valid = false;
+        if (placementLayer) placementLayer.visible = false;
+        return;
+      }
+      const front = getFrontTile();
+      if (!front) {
+        placement.valid = false;
+        if (placementLayer) placementLayer.visible = false;
+        return;
+      }
+
+      placement.x = front.x;
+      placement.y = front.y;
+
+      if (!placementLayer) return;
+      const { tile } = state.map;
+      placementLayer.clear();
+
+      if (isBombSelected()) {
+        const valid = isCellEmpty(front.x, front.y);
+        placement.valid = valid;
+        placementLayer.beginFill(valid ? 0x38d86b : 0xff5d5d, 0.35);
+        placementLayer.drawRect(front.x * tile, front.y * tile, tile, tile);
+        placementLayer.endFill();
+        placementLayer.visible = true;
+        return;
+      }
+
+        if (isStorageSelected() || isShopSelected() || isUpgradeSelected()) {
+          const facingUp =
+            localPlayerRef.current.fx === 0 && localPlayerRef.current.fy === -1;
+          const latest = state.snapshots[state.snapshots.length - 1];
+          const occupied = new Set();
+        if (latest) {
+          for (const p of latest.map.values()) {
+            if (p.id !== state.playerId) {
+              occupied.add(`${p.tx},${p.ty}`);
+            }
           }
         }
+
+        if (isStorageSelected()) {
+          const topLeftX = front.x - 1;
+          const topLeftY = front.y - 1;
+          const width = 3;
+          const height = 2;
+          let valid = facingUp;
+          if (
+            topLeftX < 0 ||
+            topLeftY < 0 ||
+            topLeftX + width > state.map.w ||
+            topLeftY + height > state.map.h
+          ) {
+            valid = false;
+          } else {
+            const checkX0 = topLeftX - 1;
+            const checkY0 = topLeftY - 1;
+            const checkX1 = topLeftX + width;
+            const checkY1 = topLeftY + height;
+            if (
+              checkX0 < 0 ||
+              checkY0 < 0 ||
+              checkX1 >= state.map.w ||
+              checkY1 >= state.map.h
+            ) {
+              valid = false;
+            } else {
+              for (let y = checkY0; y <= checkY1; y += 1) {
+                for (let x = checkX0; x <= checkX1; x += 1) {
+                  if (!isCellEmpty(x, y) || occupied.has(`${x},${y}`)) {
+                    valid = false;
+                    break;
+                  }
+                }
+                if (!valid) break;
+              }
+            }
+          }
+
+          placement.valid = valid;
+          placementLayer.beginFill(valid ? 0x38d86b : 0xff5d5d, 0.35);
+          for (let y = topLeftY; y < topLeftY + height; y += 1) {
+            for (let x = topLeftX; x < topLeftX + width; x += 1) {
+              if (x === front.x && y === front.y) continue;
+              placementLayer.drawRect(x * tile, y * tile, tile, tile);
+            }
+          }
+          placementLayer.endFill();
+          placementLayer.visible = true;
+          return;
+        }
+
+        if (isShopSelected()) {
+          const radius = 2;
+          const topLeftX = front.x - radius;
+          const topLeftY = front.y - radius;
+          const size = radius * 2 + 1;
+          let valid = facingUp;
+          if (
+            topLeftX < 0 ||
+            topLeftY < 0 ||
+            topLeftX + size > state.map.w ||
+            topLeftY + size > state.map.h
+          ) {
+            valid = false;
+          } else {
+            const checkX0 = topLeftX - 1;
+            const checkY0 = topLeftY - 1;
+            const checkX1 = topLeftX + size;
+            const checkY1 = topLeftY + size;
+            if (
+              checkX0 < 0 ||
+              checkY0 < 0 ||
+              checkX1 >= state.map.w ||
+              checkY1 >= state.map.h
+            ) {
+              valid = false;
+            } else {
+              for (let y = checkY0; y <= checkY1; y += 1) {
+                for (let x = checkX0; x <= checkX1; x += 1) {
+                  if (!isCellEmpty(x, y) || occupied.has(`${x},${y}`)) {
+                    valid = false;
+                    break;
+                  }
+                }
+                if (!valid) break;
+              }
+            }
+          }
+
+          placement.valid = valid;
+          placementLayer.beginFill(valid ? 0x38d86b : 0xff5d5d, 0.35);
+          for (let y = topLeftY; y < topLeftY + size; y += 1) {
+            for (let x = topLeftX; x < topLeftX + size; x += 1) {
+              const onCross =
+                (x === front.x && Math.abs(y - front.y) <= radius) ||
+                (y === front.y && Math.abs(x - front.x) <= radius);
+              const isCorner =
+                (x === topLeftX && y === topLeftY) ||
+                (x === topLeftX && y === topLeftY + size - 1) ||
+                (x === topLeftX + size - 1 && y === topLeftY) ||
+                (x === topLeftX + size - 1 && y === topLeftY + size - 1);
+              if (onCross || isCorner) continue;
+              placementLayer.drawRect(x * tile, y * tile, tile, tile);
+            }
+          }
+          placementLayer.endFill();
+          placementLayer.visible = true;
+        }
+        if (isUpgradeSelected()) {
+          const topLeftX = front.x - 1;
+          const topLeftY = front.y - 2;
+          const width = 3;
+          const height = 3;
+          let valid = facingUp;
+          if (
+            topLeftX < 0 ||
+            topLeftY < 0 ||
+            topLeftX + width > state.map.w ||
+            topLeftY + height > state.map.h
+          ) {
+            valid = false;
+          } else {
+            const checkX0 = topLeftX - 1;
+            const checkY0 = topLeftY - 1;
+            const checkX1 = topLeftX + width;
+            const checkY1 = topLeftY + height;
+            if (
+              checkX0 < 0 ||
+              checkY0 < 0 ||
+              checkX1 >= state.map.w ||
+              checkY1 >= state.map.h
+            ) {
+              valid = false;
+            } else {
+              for (let y = checkY0; y <= checkY1; y += 1) {
+                for (let x = checkX0; x <= checkX1; x += 1) {
+                  if (!isCellEmpty(x, y) || occupied.has(`${x},${y}`)) {
+                    valid = false;
+                    break;
+                  }
+                }
+                if (!valid) break;
+              }
+            }
+          }
+
+          placement.valid = valid;
+          placementLayer.beginFill(valid ? 0x38d86b : 0xff5d5d, 0.35);
+          for (let y = topLeftY; y < topLeftY + height; y += 1) {
+            for (let x = topLeftX; x < topLeftX + width; x += 1) {
+              if (x === front.x && y === front.y) continue;
+              if (x === front.x && y === front.y - 1) continue;
+              placementLayer.drawRect(x * tile, y * tile, tile, tile);
+            }
+          }
+          placementLayer.endFill();
+          placementLayer.visible = true;
+        }
       }
+    }
+
+    function createBombSprite(x, y, type) {
+      const { tile } = state.map;
+      const sprite = new Graphics();
+      const color = type === "plasmabomb" ? 0x6f5bff : 0x1b1f24;
+      sprite.beginFill(color, 0.95);
+      sprite.drawCircle(0, 0, Math.max(4, tile * 0.2));
+      sprite.endFill();
+      sprite.lineStyle(2, 0xff8f4a, 0.9);
+      sprite.drawCircle(0, 0, Math.max(5, tile * 0.24));
+      sprite.position.set((x + 0.5) * tile, (y + 0.5) * tile);
+      return sprite;
     }
 
     function getPlayerSprite(id) {
@@ -412,6 +1229,7 @@ export default function GameView({ token, onAuthExpired }) {
         sprite.body = body;
         sprite.facingGraphic = facing;
         sprite.label = label;
+        sprite.renderPos = { x: 0, y: 0, ready: false };
         sprite.addChild(body);
         sprite.addChild(facing);
         sprite.addChild(label);
@@ -471,6 +1289,39 @@ export default function GameView({ token, onAuthExpired }) {
       const me = state.playerId ? map.get(state.playerId) : null;
       if (me) {
         setCoords({ x: me.tx, y: me.ty });
+        localPlayerRef.current = {
+          tx: me.tx,
+          ty: me.ty,
+          fx: me.fx ?? localPlayerRef.current.fx,
+          fy: me.fy ?? localPlayerRef.current.fy,
+          ready: true
+        };
+        const chunkSize = state.map.chunk || DEFAULT_MAP.chunk;
+        const minX = Math.max(0, me.tx - VIEW_RADIUS_TILES);
+        const maxX = Math.min(state.map.w - 1, me.tx + VIEW_RADIUS_TILES);
+        const minY = Math.max(0, me.ty - VIEW_RADIUS_TILES);
+        const maxY = Math.min(state.map.h - 1, me.ty + VIEW_RADIUS_TILES);
+        const minCx = Math.floor(minX / chunkSize);
+        const maxCx = Math.floor(maxX / chunkSize);
+        const minCy = Math.floor(minY / chunkSize);
+        const maxCy = Math.floor(maxY / chunkSize);
+        const now = performance.now();
+        const request = [];
+        for (let cy = minCy; cy <= maxCy; cy += 1) {
+          for (let cx = minCx; cx <= maxCx; cx += 1) {
+            if (!chunkIntersectsView(cx, cy)) continue;
+            const key = chunkKey(cx, cy);
+            if (loadedChunksRef.current.has(key)) continue;
+            const last = chunkRequestTimeRef.current.get(key) || 0;
+            if (now - last < 800) continue;
+            chunkRequestTimeRef.current.set(key, now);
+            request.push({ cx, cy });
+          }
+        }
+        if (request.length > 0) {
+          requestChunks(request);
+        }
+        updateBuildingWindows();
       }
     }
 
@@ -535,7 +1386,25 @@ export default function GameView({ token, onAuthExpired }) {
         const x = (lerp(a.tx, b.tx, t) + 0.5) * tile;
         const y = (lerp(a.ty, b.ty, t) + 0.5) * tile;
         const sprite = getPlayerSprite(id);
-        sprite.position.set(x, y);
+        if (!sprite.renderPos.ready) {
+          sprite.renderPos.x = x;
+          sprite.renderPos.y = y;
+          sprite.renderPos.ready = true;
+        } else {
+        sprite.renderPos.x = smoothTowards(
+          sprite.renderPos.x,
+          x,
+          dtMs,
+          90
+        );
+          sprite.renderPos.y = smoothTowards(
+            sprite.renderPos.y,
+            y,
+            dtMs,
+            90
+          );
+        }
+        sprite.position.set(sprite.renderPos.x, sprite.renderPos.y);
 
         const fx = b.fx ?? a.fx;
         const fy = b.fy ?? a.fy;
@@ -558,16 +1427,28 @@ export default function GameView({ token, onAuthExpired }) {
 
         activeIds.add(id);
         if (id === state.playerId) {
-          localPosition = { x, y };
+          localPosition = { x: sprite.renderPos.x, y: sprite.renderPos.y };
         }
       }
 
       removeMissingPlayers(activeIds);
 
       if (localPosition && app) {
-        world.pivot.set(localPosition.x, localPosition.y);
+        if (!camera.ready) {
+          camera.x = localPosition.x;
+          camera.y = localPosition.y;
+          camera.ready = true;
+        } else {
+          const smoothTimeMs = 320;
+          const alpha = 1 - Math.exp(-dtMs / smoothTimeMs);
+          camera.x += (localPosition.x - camera.x) * alpha;
+          camera.y += (localPosition.y - camera.y) * alpha;
+        }
+        world.pivot.set(camera.x, camera.y);
         world.position.set(app.renderer.width / 2, app.renderer.height / 2);
       }
+
+      updatePlacement();
     }
 
     async function setup() {
@@ -585,18 +1466,27 @@ export default function GameView({ token, onAuthExpired }) {
       world = new Container();
       grid = new Graphics();
       gridLines = new Graphics();
-      terrain = new Graphics();
+      terrain = new Container();
+      buildingLayer = new Container();
+      placementLayer = new Graphics();
+      placementLayer.visible = false;
+      bombsLayer = new Container();
       effectsLayer = new Container();
       playersLayer = new Container();
 
       drawGrid();
       drawTerrain();
+      drawBuildings();
 
       world.addChild(grid);
       world.addChild(terrain);
+      world.addChild(buildingLayer);
+      world.addChild(placementLayer);
       world.addChild(effectsLayer);
       world.addChild(gridLines);
+      world.addChild(bombsLayer);
       world.addChild(playersLayer);
+      world.scale.set(CAMERA_ZOOM);
       app.stage.addChild(world);
 
       const handleResize = () => {
@@ -616,11 +1506,17 @@ export default function GameView({ token, onAuthExpired }) {
           setMapOpen(false);
           return;
         }
+        if (event.code === "KeyF" && !event.repeat && !chatFocusRef.current) {
+          useSelectedItem();
+          return;
+        }
         updateInputKey(event.code, true);
       };
       const onKeyUp = (event) => updateInputKey(event.code, false);
       window.addEventListener("keydown", onKeyDown);
       window.addEventListener("keyup", onKeyUp);
+
+      // bomb placement via F only
 
       const baseUrl =
         import.meta.env.VITE_SERVER_URL || "ws://localhost:8080";
@@ -650,6 +1546,9 @@ export default function GameView({ token, onAuthExpired }) {
         }
 
         if (msg.t === "welcome") {
+          if (msg.username) {
+            usernameRef.current = String(msg.username);
+          }
           state.playerId = msg.id;
           mapDataRef.current.playerId = msg.id;
           state.serverTimeOffset = performance.now() - msg.time;
@@ -657,9 +1556,15 @@ export default function GameView({ token, onAuthExpired }) {
             state.map = { ...state.map, ...msg.map };
             mapDataRef.current.w = state.map.w;
             mapDataRef.current.h = state.map.h;
-            mapDataRef.current.tiles = state.map.tiles || null;
+            mapDataRef.current.chunk = state.map.chunk || DEFAULT_MAP.chunk;
+            mapDataRef.current.tiles = new Map();
+            mapDataRef.current.buildings = new Map();
+            loadedChunksRef.current.clear();
+            exploredChunksRef.current.clear();
+            chunkRequestTimeRef.current.clear();
             drawGrid();
             drawTerrain();
+            drawBuildings();
             requestMapDraw();
           }
           if (msg.wallet) {
@@ -684,19 +1589,152 @@ export default function GameView({ token, onAuthExpired }) {
               cyan: Number(msg.inventory.cyan || 0)
             });
           }
+          if (Array.isArray(msg.items)) {
+            applyItems(msg.items);
+          }
+          if (Array.isArray(msg.buildings)) {
+            buildingsRef.current = msg.buildings;
+            updateBuildingWindows();
+          }
+          if (Array.isArray(msg.explored)) {
+            exploredChunksRef.current = new Set(
+              msg.explored
+                .map((entry) => {
+                  const cx = Number(entry?.cx);
+                  const cy = Number(entry?.cy);
+                  if (!Number.isFinite(cx) || !Number.isFinite(cy)) return null;
+                  return chunkKey(cx, cy);
+                })
+                .filter(Boolean)
+            );
+            if (mapOpenRef.current && hydrateCacheRef.current) {
+              hydrateCacheRef.current();
+            } else if (mapOpenRef.current) {
+              requestMapDraw();
+            }
+          }
         }
 
         if (msg.t === "state") {
           pushSnapshot(msg);
         }
 
-        if (msg.t === "tile") {
-          if (state.map.tiles && state.map.tiles[msg.y]) {
-            state.map.tiles[msg.y][msg.x] = msg.value;
-            mapDataRef.current.tiles = state.map.tiles;
-            drawTerrain();
+        if (msg.t === "map_chunk") {
+          const cx = Number(msg.cx);
+          const cy = Number(msg.cy);
+          const w = Number(msg.w);
+          const h = Number(msg.h);
+          if (
+            Number.isFinite(cx) &&
+            Number.isFinite(cy) &&
+            Number.isFinite(w) &&
+            Number.isFinite(h) &&
+            msg.tiles &&
+            msg.buildings
+          ) {
+            const tiles = decodeBase64(msg.tiles);
+            const buildings = decodeBase64(msg.buildings);
+            storeChunk(mapDataRef.current.tiles, cx, cy, w, h, tiles);
+            storeChunk(mapDataRef.current.buildings, cx, cy, w, h, buildings);
+            loadedChunksRef.current.add(chunkKey(cx, cy));
+            exploredChunksRef.current.add(chunkKey(cx, cy));
+            saveChunkCache(cx, cy, msg.tiles, msg.buildings);
+            drawTerrainChunk(cx, cy);
+            drawBuildingChunk(cx, cy);
             requestMapDraw();
           }
+        }
+
+        if (msg.t === "tile") {
+          if (isTileWithinView(msg.x, msg.y)) {
+            const updated = setChunkValue(
+              mapDataRef.current.tiles,
+              msg.x,
+              msg.y,
+              msg.value
+            );
+            if (updated) {
+              drawTerrainChunk(updated.cx, updated.cy);
+              requestMapDraw();
+            }
+          }
+        }
+
+        if (msg.t === "building_place") {
+          if (Array.isArray(msg.tiles)) {
+            const touched = new Set();
+            for (const tile of msg.tiles) {
+              if (!isTileWithinView(tile.x, tile.y)) continue;
+              const updated = setChunkValue(
+                mapDataRef.current.buildings,
+                tile.x,
+                tile.y,
+                tile.value
+              );
+              if (updated) {
+                touched.add(chunkKey(updated.cx, updated.cy));
+              }
+            }
+            for (const key of touched) {
+              const [cx, cy] = key.split(",").map((v) => Number(v));
+              if (Number.isFinite(cx) && Number.isFinite(cy)) {
+                drawBuildingChunk(cx, cy);
+              }
+            }
+            if (touched.size > 0) {
+              requestMapDraw();
+            }
+          }
+          if (msg.building) {
+            buildingsRef.current = [...buildingsRef.current, msg.building];
+            updateBuildingWindows();
+          }
+        }
+
+        if (msg.t === "bomb_placed") {
+          if (Number.isFinite(msg.x) && Number.isFinite(msg.y)) {
+            const key = `${msg.x},${msg.y}`;
+            if (!bombs.has(key)) {
+              const sprite = createBombSprite(msg.x, msg.y, msg.type);
+              bombsLayer.addChild(sprite);
+              bombs.set(key, { id: msg.id, sprite, type: msg.type });
+              updatePlacement();
+            }
+          }
+        }
+
+        if (msg.t === "bomb_explode") {
+          const key = `${msg.x},${msg.y}`;
+          const entry = bombs.get(key);
+          if (entry) {
+            bombsLayer.removeChild(entry.sprite);
+            entry.sprite.destroy();
+            bombs.delete(key);
+          }
+          if (Number.isFinite(msg.x) && Number.isFinite(msg.y)) {
+            const { tile } = state.map;
+            const blast = new Graphics();
+            blast.lineStyle(3, 0xff8f4a, 0.9);
+            if (msg.shape === "cross") {
+              const r = msg.r || 1;
+              const len = tile * r;
+              blast.moveTo(-len, 0);
+              blast.lineTo(len, 0);
+              blast.moveTo(0, -len);
+              blast.lineTo(0, len);
+            } else {
+              blast.drawCircle(0, 0, Math.max(12, tile * (msg.r || 4)));
+            }
+            blast.position.set((msg.x + 0.5) * tile, (msg.y + 0.5) * tile);
+            effectsLayer.addChild(blast);
+            effects.push({
+              sprite: blast,
+              age: 0,
+              duration: 300,
+              kind: "spark"
+            });
+          }
+          updatePlacement();
         }
 
         if (msg.t === "inventory" && msg.inventory) {
@@ -708,6 +1746,10 @@ export default function GameView({ token, onAuthExpired }) {
             pink: Number(msg.inventory.pink || 0),
             cyan: Number(msg.inventory.cyan || 0)
           });
+        }
+
+        if (msg.t === "items" && Array.isArray(msg.items)) {
+          applyItems(msg.items);
         }
 
         if (msg.t === "hit") {
@@ -774,6 +1816,37 @@ export default function GameView({ token, onAuthExpired }) {
             return next.slice(-60);
           });
         }
+
+        if (msg.t === "hp") {
+          setHp({
+            current: Number(msg.current || 0),
+            max: Number(msg.max || 0)
+          });
+        }
+
+        if (msg.t === "wallet") {
+          setWallet({
+            dollars: Number(msg.dollars || 0),
+            coins: Number(msg.coins || 0)
+          });
+        }
+
+        if (msg.t === "items" && Array.isArray(msg.items)) {
+          applyItems(msg.items);
+        }
+
+        if (msg.t === "storage_state" && msg.storage) {
+          const id = String(msg.id || "");
+          if (storageIdRef.current && id !== storageIdRef.current) return;
+          setStorageState({
+            green: Number(msg.storage.green || 0),
+            blue: Number(msg.storage.blue || 0),
+            white: Number(msg.storage.white || 0),
+            red: Number(msg.storage.red || 0),
+            pink: Number(msg.storage.pink || 0),
+            cyan: Number(msg.storage.cyan || 0)
+          });
+        }
       });
 
       inputInterval = setInterval(() => {
@@ -823,6 +1896,189 @@ export default function GameView({ token, onAuthExpired }) {
     setChatInput("");
   }
 
+  function useSelectedItem() {
+    const id = selectedItemRef.current;
+    if (!id) return;
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) return;
+    if (id === "bomb" || id === "plasmabomb") {
+      const placement = placementRef.current;
+      if (!placement.valid) return;
+      socket.send(
+        JSON.stringify({
+          t: "place_bomb",
+          x: placement.x,
+          y: placement.y,
+          id
+        })
+      );
+      return;
+    }
+    if (id === "storage") {
+      const placement = placementRef.current;
+      if (!placement.valid) return;
+      socket.send(
+        JSON.stringify({
+          t: "place_building",
+          type: "storage",
+          x: placement.x,
+          y: placement.y
+        })
+      );
+      return;
+    }
+    if (id === "shop") {
+      const placement = placementRef.current;
+      if (!placement.valid) return;
+      socket.send(
+        JSON.stringify({
+          t: "place_building",
+          type: "shop",
+          x: placement.x,
+          y: placement.y
+        })
+      );
+      return;
+    }
+    if (id === "upgrade") {
+      const placement = placementRef.current;
+      if (!placement.valid) return;
+      socket.send(
+        JSON.stringify({
+          t: "place_building",
+          type: "upgrade",
+          x: placement.x,
+          y: placement.y
+        })
+      );
+      return;
+    }
+    socket.send(JSON.stringify({ t: "use_item", id }));
+  }
+
+  function sellCrystal(id, amount = 1) {
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) return;
+    socket.send(
+      JSON.stringify({
+        t: "shop_sell",
+        crystal: id,
+        amount
+      })
+    );
+  }
+
+  function updateShopSell(id, value, max) {
+    const numeric = Math.floor(Number(value) || 0);
+    const clamped = Math.max(0, Math.min(numeric, max));
+    setShopSell((prev) => ({
+      ...prev,
+      [id]: clamped
+    }));
+  }
+
+  function updateShopBuy(id, value) {
+    const numeric = Math.floor(Number(value) || 0);
+    const clamped = Math.max(0, Number.isFinite(numeric) ? numeric : 0);
+    setShopBuy((prev) => ({
+      ...prev,
+      [id]: clamped
+    }));
+  }
+
+  function sellSelectedCrystals() {
+    if (sellCountTotal <= 0) return;
+    for (const item of SHOP_ITEMS) {
+      const amount = shopSell[item.id] ?? 0;
+      if (amount > 0) {
+        sellCrystal(item.id, amount);
+      }
+    }
+    setShopSell({
+      green: 0,
+      blue: 0,
+      white: 0,
+      red: 0,
+      pink: 0,
+      cyan: 0
+    });
+  }
+
+  function updateStorageTransferValue(id, value) {
+    const numeric = Math.floor(Number(value) || 0);
+    const clamped = Math.max(0, Number.isFinite(numeric) ? numeric : 0);
+    setStorageTransfer((prev) => ({
+      ...prev,
+      [id]: clamped
+    }));
+  }
+
+  function moveStorageCrystal(id, dir) {
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) return;
+    const storageIdValue = storageIdRef.current;
+    if (!storageIdValue) return;
+    const desired = Math.floor(Number(storageTransfer[id] || 0));
+    if (!Number.isFinite(desired) || desired <= 0) return;
+    const max =
+      dir === "deposit" ? inventory[id] ?? 0 : storageState[id] ?? 0;
+    const amount = Math.min(max, desired);
+    if (amount <= 0) return;
+    socket.send(
+      JSON.stringify({
+        t: "storage_move",
+        id: storageIdValue,
+        crystal: id,
+        amount,
+        dir
+      })
+    );
+    setStorageTransfer((prev) => ({ ...prev, [id]: 0 }));
+  }
+
+  function buySelectedCrystals() {
+    if (buyCountTotal <= 0) return;
+    for (const item of SHOP_ITEMS) {
+      const amount = shopBuy[item.id] ?? 0;
+      if (amount > 0) {
+        const socket = socketRef.current;
+        if (!socket || socket.readyState !== WebSocket.OPEN) return;
+        socket.send(
+          JSON.stringify({
+            t: "shop_buy",
+            crystal: item.id,
+            amount
+          })
+        );
+      }
+    }
+    setShopBuy({
+      green: 0,
+      blue: 0,
+      white: 0,
+      red: 0,
+      pink: 0,
+      cyan: 0
+    });
+  }
+
+  const sellCountTotal = SHOP_ITEMS.reduce(
+    (sum, item) => sum + (shopSell[item.id] ?? 0),
+    0
+  );
+  const buyCountTotal = SHOP_ITEMS.reduce(
+    (sum, item) => sum + (shopBuy[item.id] ?? 0),
+    0
+  );
+  const sellTotal = SHOP_ITEMS.reduce(
+    (sum, item) => sum + (shopSell[item.id] ?? 0) * item.price,
+    0
+  );
+  const buyTotal = SHOP_ITEMS.reduce(
+    (sum, item) => sum + (shopBuy[item.id] ?? 0) * item.price * 2,
+    0
+  );
+
   return (
     <div className="game-wrap">
       <div ref={containerRef} className="game-wrap" />
@@ -849,7 +2105,6 @@ export default function GameView({ token, onAuthExpired }) {
           <div>
             X: {coords.x} Y: {coords.y}
           </div>
-          <div>WASD or Arrows to move</div>
         </div>
         <div className="game-overlay inventory-overlay">
           <div className="inventory-title">Inventory</div>
@@ -893,8 +2148,297 @@ export default function GameView({ token, onAuthExpired }) {
           </div>
         </div>
       </div>
-      <div className="chat-panel">
-        <div className="chat-title">Chat</div>
+      <div className="game-overlay items-overlay">
+        <div className="items-header">
+          <div className="items-title">Items</div>
+          <div className="items-selected">
+            {itemInventory.find((item) => item.id === selectedItemId)?.name ||
+              "None"}
+          </div>
+        </div>
+        <div className="items-grid">
+          {sortedItems.map((item) => (
+            <button
+              key={item.id}
+              className={`item-slot${
+                selectedItemId === item.id ? " is-selected" : ""
+              }${item.count > 0 ? "" : " is-disabled"}`}
+              type="button"
+              disabled={item.count <= 0}
+              onClick={() =>
+                setSelectedItemId((prev) => (prev === item.id ? null : item.id))
+              }
+            >
+              <div className="item-name">{item.name}</div>
+              <div className="item-count">x{item.count}</div>
+            </button>
+          ))}
+        </div>
+      </div>
+      {storageOpen ? (
+        <div className="storage-backdrop">
+          <div className="storage-modal">
+            <div className="storage-title">Storage</div>
+            <div className="shop-tabs">
+              <button
+                className={`shop-tab${
+                  storageTab === "storage" ? " is-active" : ""
+                }`}
+                type="button"
+                onClick={() => setStorageTab("storage")}
+              >
+                Storage
+              </button>
+              {storageOwner && storageOwner === (usernameRef.current || "") ? (
+                <button
+                  className={`shop-tab${
+                    storageTab === "manage" ? " is-active" : ""
+                  }`}
+                  type="button"
+                  onClick={() => setStorageTab("manage")}
+                >
+                  Управление
+                </button>
+              ) : null}
+            </div>
+            {storageTab === "storage" ? (
+              <div className="storage-list">
+                {STORAGE_ITEMS.map((item) => {
+                  const carry = inventory[item.id] ?? 0;
+                  const stored = storageState[item.id] ?? 0;
+                  const amount = storageTransfer[item.id] ?? 0;
+                  return (
+                    <div key={item.id} className="storage-row">
+                      <div className="storage-info">
+                        <span className={`storage-name ${item.className}`}>
+                          {item.name}
+                        </span>
+                        <span className="storage-carry">You: {carry}</span>
+                        <span className="storage-stored">Store: {stored}</span>
+                      </div>
+                      <input
+                        className="storage-input"
+                        type="number"
+                        inputMode="numeric"
+                        min="0"
+                        step="1"
+                        value={amount}
+                        onChange={(event) =>
+                          updateStorageTransferValue(item.id, event.target.value)
+                        }
+                      />
+                      <div className="storage-actions">
+                        <button
+                          className="storage-btn"
+                          type="button"
+                          disabled={carry <= 0 || amount <= 0}
+                          onClick={() => moveStorageCrystal(item.id, "deposit")}
+                        >
+                          Put
+                        </button>
+                        <button
+                          className="storage-btn"
+                          type="button"
+                          disabled={stored <= 0 || amount <= 0}
+                          onClick={() => moveStorageCrystal(item.id, "withdraw")}
+                        >
+                          Take
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="storage-manage" />
+            )}
+          </div>
+        </div>
+      ) : null}
+      {shopOpen ? (
+        <div className="storage-backdrop">
+          <div className="storage-modal">
+            <div className="storage-title">Shop</div>
+            <div className="shop-tabs">
+              <button
+                className={`shop-tab${shopTab === "sell" ? " is-active" : ""}`}
+                type="button"
+                onClick={() => setShopTab("sell")}
+              >
+                Sell
+              </button>
+              <button
+                className={`shop-tab${shopTab === "buy" ? " is-active" : ""}`}
+                type="button"
+                onClick={() => setShopTab("buy")}
+              >
+                Buy
+              </button>
+              {shopOwner && shopOwner === (usernameRef.current || "") ? (
+                <button
+                  className={`shop-tab${
+                    shopTab === "manage" ? " is-active" : ""
+                  }`}
+                  type="button"
+                  onClick={() => setShopTab("manage")}
+                >
+                  Управление
+                </button>
+              ) : null}
+            </div>
+            {shopTab === "sell" ? (
+              <>
+                <div className="shop-list">
+                  {SHOP_ITEMS.map((item) => {
+                    const count = inventory[item.id] ?? 0;
+                    const sellCount = shopSell[item.id] ?? 0;
+                    return (
+                      <div key={item.id} className="shop-row">
+                        <div className="shop-info">
+                          <span className={`shop-name ${item.className}`}>
+                            {item.name}
+                          </span>
+                          <span className="shop-count">x{count}</span>
+                        </div>
+                        <input
+                          className="shop-slider"
+                          type="range"
+                          min="0"
+                          max={count}
+                          step="1"
+                          value={sellCount}
+                          disabled={count <= 0}
+                          onChange={(event) =>
+                            updateShopSell(item.id, event.target.value, count)
+                          }
+                        />
+                        <input
+                          className="shop-input"
+                          type="number"
+                          inputMode="numeric"
+                          min="0"
+                          max={count}
+                          step="1"
+                          value={sellCount}
+                          disabled={count <= 0}
+                          onChange={(event) =>
+                            updateShopSell(item.id, event.target.value, count)
+                          }
+                        />
+                        <div className="shop-price">${item.price}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="shop-footer">
+                  <div className="shop-total">Total: ${sellTotal}</div>
+                  <button
+                    className="shop-sell"
+                    type="button"
+                    disabled={sellCountTotal <= 0}
+                    onClick={sellSelectedCrystals}
+                  >
+                    Sell
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                {shopTab === "buy" ? (
+                  <>
+                    <div className="shop-list">
+                      {SHOP_ITEMS.map((item) => {
+                        const count = inventory[item.id] ?? 0;
+                        const buyCount = shopBuy[item.id] ?? 0;
+                        return (
+                          <div key={item.id} className="shop-row is-buy">
+                            <div className="shop-info">
+                              <span className={`shop-name ${item.className}`}>
+                                {item.name}
+                              </span>
+                              <span className="shop-count">x{count}</span>
+                            </div>
+                            <input
+                              className="shop-input"
+                              type="number"
+                              inputMode="numeric"
+                              min="0"
+                              step="1"
+                              value={buyCount}
+                              onChange={(event) =>
+                                updateShopBuy(item.id, event.target.value)
+                              }
+                            />
+                            <div className="shop-price">${item.price * 2}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="shop-footer">
+                      <div className="shop-total">Total: ${buyTotal}</div>
+                      <button
+                        className="shop-sell"
+                        type="button"
+                        disabled={buyCountTotal <= 0}
+                        onClick={buySelectedCrystals}
+                      >
+                        Buy
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <div className="shop-manage" />
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      ) : null}
+      {upgradeOpen ? (
+        <div className="storage-backdrop">
+          <div className="storage-modal">
+            <div className="storage-title">Ап</div>
+            <div className="shop-tabs">
+              <button
+                className={`shop-tab${
+                  upgradeTab === "upgrade" ? " is-active" : ""
+                }`}
+                type="button"
+                onClick={() => setUpgradeTab("upgrade")}
+              >
+                Ап
+              </button>
+              {upgradeOwner && upgradeOwner === (usernameRef.current || "") ? (
+                <button
+                  className={`shop-tab${
+                    upgradeTab === "manage" ? " is-active" : ""
+                  }`}
+                  type="button"
+                  onClick={() => setUpgradeTab("manage")}
+                >
+                  Управление
+                </button>
+              ) : null}
+            </div>
+            {upgradeTab === "manage" ? (
+              <div className="upgrade-manage" />
+            ) : (
+              <div className="upgrade-body" />
+            )}
+          </div>
+        </div>
+      ) : null}
+      <div className={`chat-panel${chatOpen ? "" : " is-collapsed"}`}>
+        <div className="chat-header">
+          <div className="chat-title">Chat</div>
+          <button
+            className="chat-toggle"
+            type="button"
+            onClick={() => setChatOpen((prev) => !prev)}
+          >
+            {chatOpen ? "Hide" : "Show"}
+          </button>
+        </div>
         <div className="chat-messages">
           {chatMessages.map((msg, index) => (
             <div key={`${msg.time}-${index}`} className="chat-line">
@@ -903,17 +2447,19 @@ export default function GameView({ token, onAuthExpired }) {
             </div>
           ))}
         </div>
-        <form className="chat-input-row" onSubmit={submitChat}>
-          <input
-            className="chat-input"
-            value={chatInput}
-            onChange={(event) => setChatInput(event.target.value)}
-            onFocus={() => setChatFocused(true)}
-            onBlur={() => setChatFocused(false)}
-            placeholder="Type message..."
-            maxLength={160}
-          />
-        </form>
+        {chatOpen ? (
+          <form className="chat-input-row" onSubmit={submitChat}>
+            <input
+              className="chat-input"
+              value={chatInput}
+              onChange={(event) => setChatInput(event.target.value)}
+              onFocus={() => setChatFocused(true)}
+              onBlur={() => setChatFocused(false)}
+              placeholder="Type message..."
+              maxLength={160}
+            />
+          </form>
+        ) : null}
       </div>
       {mapOpen ? (
         <div
