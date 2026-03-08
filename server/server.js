@@ -3,215 +3,118 @@ const WebSocket = require("ws");
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
-const Database = require("better-sqlite3");
+
+const {
+  BASE_HP,
+  DEPTH_OVERLOAD_INTERVAL_MS,
+  TICK_RATE,
+  MINE_COOLDOWN_MS,
+  CHAT_MAX_LEN,
+  CRYSTAL_PRICES,
+  BUILDING_TYPES,
+  MAP_W,
+  MAP_H,
+  TILE_SIZE,
+  CHUNK_SIZE,
+  TILE_TYPES,
+  CRYSTAL_TILE_TO_COLOR,
+  BOMB_ITEMS,
+  BUILDING_ITEMS,
+  TILE_HP
+} = require("./lib/config");
+const {
+  SKILL_DEFS,
+  getSkillConfig,
+  getSkillXpNeed,
+  getSkillCost,
+  getMoveStepDelayMs,
+  getMiningDamage,
+  getMaxDepth,
+  getOverloadPercent,
+  isInventoryNearCapacity
+} = require("./lib/skills");
+const { createDb } = require("./lib/db");
+const { createBuildingManager } = require("./lib/buildings");
+const { createBombManager } = require("./lib/bombs");
+const { createPlayerService } = require("./lib/players");
+const {
+  chunkKey,
+  parseExplored,
+  encodeExplored,
+  chunkIntersectsView,
+  exploredPayload,
+  updateExplored
+} = require("./lib/exploration");
 
 const PORT = Number(process.env.PORT || 8080);
-const TICK_RATE = 20;
-const MOVE_TILES_PER_SEC = 10;
-const STEP_DELAY_MS = 1000 / MOVE_TILES_PER_SEC;
-const MINE_HITS_PER_SEC = 4;
-const MINE_COOLDOWN_MS = 1000 / MINE_HITS_PER_SEC;
-const CHAT_MAX_LEN = 160;
-const BOMB_DELAY_MS = 5000;
-const BOMB_DAMAGE = 30;
-const VIEW_RADIUS_TILES = 128;
-const CRYSTAL_PRICES = {
-  green: 8,
-  blue: 12,
-  white: 20,
-  red: 15,
-  pink: 40,
-  cyan: 60
-};
-const BUILDING_TYPES = {
-  none: 0,
-  storage: 1,
-  shop: 2,
-  upgrade: 3
-};
-
-const MAP_W = 1000;
-const MAP_H = 1000;
-const TILE_SIZE = 32;
-const CHUNK_SIZE = 64;
-const TILE_TYPES = {
-  empty: 0,
-  rock: 1,
-  crystalGreen: 2,
-  crystalBlue: 3,
-  crystalWhite: 4,
-  crystalRed: 5,
-  crystalPink: 6,
-  crystalCyan: 7,
-  blackRock: 8,
-  redRock: 9
-};
-
-const ITEM_DEFS = [
-  { id: "medkit", name: "Medkit", column: "item_medkit" },
-  { id: "bomb", name: "Bomb", column: "item_bomb" },
-  { id: "plasmabomb", name: "Plasmabomb", column: "item_plasmabomb" },
-  { id: "electrobomb", name: "Electrobomb", column: "item_electrobomb" },
-  { id: "storage", name: "Склад", column: "item_storage" },
-  { id: "shop", name: "Магазин", column: "item_shop" },
-  { id: "respawn", name: "Респавн", column: "item_respawn" },
-  { id: "upgrade", name: "Ап", column: "item_upgrade" },
-  { id: "turret", name: "Пушка", column: "item_turret" },
-  { id: "clan_hall", name: "Клановое здание", column: "item_clan_hall" }
-];
-
-const BOMB_TYPES = {
-  bomb: { radius: 4, shape: "circle", breaksRedRock: false },
-  plasmabomb: { radius: 1, shape: "cross", breaksRedRock: true }
-};
-
-const BOMB_ITEMS = new Set(Object.keys(BOMB_TYPES));
-const BUILDING_ITEMS = new Set(["storage", "shop", "upgrade"]);
-
-const TILE_HP = new Map([
-  [TILE_TYPES.rock, 3],
-  [TILE_TYPES.crystalGreen, 6],
-  [TILE_TYPES.crystalBlue, 6],
-  [TILE_TYPES.crystalWhite, 10],
-  [TILE_TYPES.crystalRed, 10],
-  [TILE_TYPES.crystalPink, 10],
-  [TILE_TYPES.crystalCyan, 6]
-]);
+const SKILL_DEFAULTS = SKILL_DEFS.flatMap(() => [0, 0]);
+const SKILL_SLOT_COUNT = 20;
+const EMPTY_SKILL_SLOTS = Array.from({ length: SKILL_SLOT_COUNT }, () => null);
 
 const dataDir = path.join(__dirname, "data");
 fs.mkdirSync(dataDir, { recursive: true });
 
-const MAP_MAGIC = "TMAP";
-const MAP_VERSION = 1;
-const MAP_FILE = path.join(dataDir, "map.bin");
-const BUILDINGS_FILE = path.join(dataDir, "buildings.bin");
-const BUILDINGS_META_FILE = path.join(dataDir, "buildings.json");
+const { createMapStore } = require("./lib/mapStore");
 
-function layerIndex(x, y) {
-  return y * MAP_W + x;
-}
+const mapStore = createMapStore(dataDir);
+const {
+  getTile,
+  setTile,
+  getBuilding,
+  setBuilding,
+  getTileHp,
+  setTileHp,
+  deleteTileHp,
+  encodeMapChunk,
+  encodeBuildingChunk,
+  flushDirty
+} = mapStore;
 
-function chunkKey(cx, cy) {
-  return `${cx},${cy}`;
-}
+const CRYSTAL_COLORS = Object.keys(CRYSTAL_PRICES || {});
+const dropBoxesFile = path.join(dataDir, "drop_boxes.json");
+const dropBoxes = new Map();
+let dropBoxesDirty = false;
 
-function clamp(value, min, max) {
-  return Math.max(min, Math.min(max, value));
-}
-
-function loadLayer(filePath, expectedW, expectedH) {
-  if (!fs.existsSync(filePath)) return null;
+function loadDropBoxes() {
+  if (!fs.existsSync(dropBoxesFile)) return;
   try {
-    const buf = fs.readFileSync(filePath);
-    if (buf.length < 12) return null;
-    const magic = buf.subarray(0, 4).toString("ascii");
-    if (magic !== MAP_MAGIC) return null;
-    const version = buf.readUInt16LE(4);
-    const w = buf.readUInt16LE(6);
-    const h = buf.readUInt16LE(8);
-    if (version !== MAP_VERSION || w !== expectedW || h !== expectedH) {
-      return null;
-    }
-    const data = buf.subarray(12);
-    if (data.length !== w * h) return null;
-    return new Uint8Array(data);
-  } catch {
-    return null;
-  }
-}
-
-function saveLayer(filePath, layer, w, h) {
-  const header = Buffer.alloc(12);
-  header.write(MAP_MAGIC, 0, "ascii");
-  header.writeUInt16LE(MAP_VERSION, 4);
-  header.writeUInt16LE(w, 6);
-  header.writeUInt16LE(h, 8);
-  header.writeUInt16LE(0, 10);
-  const body = Buffer.from(layer.buffer, layer.byteOffset, layer.byteLength);
-  fs.writeFileSync(filePath, Buffer.concat([header, body]));
-}
-
-function loadBuildingsMeta() {
-  if (!fs.existsSync(BUILDINGS_META_FILE)) return [];
-  try {
-    const raw = fs.readFileSync(BUILDINGS_META_FILE, "utf-8");
+    const raw = fs.readFileSync(dropBoxesFile, "utf-8");
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveBuildingsMeta(list) {
-  fs.writeFileSync(BUILDINGS_META_FILE, JSON.stringify(list));
-}
-
-function getTile(x, y) {
-  return mapTiles[layerIndex(x, y)];
-}
-
-function setTile(x, y, type) {
-  mapTiles[layerIndex(x, y)] = type;
-  mapDirty = true;
-}
-
-function getBuilding(x, y) {
-  return buildingTiles[layerIndex(x, y)];
-}
-
-function setBuilding(x, y, type) {
-  buildingTiles[layerIndex(x, y)] = type;
-  buildingDirty = true;
-}
-
-function fillRect(layerSetter, x0, y0, w, h, type) {
-  for (let y = y0; y < y0 + h; y += 1) {
-    for (let x = x0; x < x0 + w; x += 1) {
+    if (!Array.isArray(parsed)) return;
+    for (const entry of parsed) {
+      const x = Number(entry?.x);
+      const y = Number(entry?.y);
+      if (!Number.isInteger(x) || !Number.isInteger(y)) continue;
       if (x < 0 || x >= MAP_W || y < 0 || y >= MAP_H) continue;
-      layerSetter(x, y, type);
+      const crystals = {};
+      let total = 0;
+      for (const color of CRYSTAL_COLORS) {
+        const value = Math.max(0, Math.floor(entry?.crystals?.[color] || 0));
+        crystals[color] = value;
+        total += value;
+      }
+      if (total <= 0) continue;
+      if (getTile(x, y) === TILE_TYPES.empty || getTile(x, y) === TILE_TYPES.dropBox) {
+        setTile(x, y, TILE_TYPES.dropBox);
+        setTileHp(x, y, 1);
+        dropBoxes.set(`${x},${y}`, crystals);
+      }
     }
+  } catch {
+    // ignore
   }
 }
 
-function generateInitialMap() {
-  fillRect(setTile, 8, 8, 10, 6, TILE_TYPES.rock);
-  fillRect(setTile, 28, 16, 8, 10, TILE_TYPES.rock);
-  fillRect(setTile, 14, 30, 12, 5, TILE_TYPES.rock);
-  fillRect(setTile, 4, 4, 1, 1, TILE_TYPES.crystalGreen);
-  fillRect(setTile, 5, 4, 1, 1, TILE_TYPES.crystalBlue);
-  fillRect(setTile, 6, 4, 1, 1, TILE_TYPES.crystalWhite);
-  fillRect(setTile, 7, 4, 1, 1, TILE_TYPES.crystalRed);
-  fillRect(setTile, 8, 4, 1, 1, TILE_TYPES.crystalPink);
-  fillRect(setTile, 9, 4, 1, 1, TILE_TYPES.crystalCyan);
-  fillRect(setTile, 10, 4, 1, 1, TILE_TYPES.blackRock);
-  fillRect(setTile, 11, 4, 1, 1, TILE_TYPES.redRock);
+function saveDropBoxes() {
+  const list = Array.from(dropBoxes.entries()).map(([key, crystals]) => {
+    const [x, y] = key.split(",").map((v) => Number(v));
+    return { x, y, crystals };
+  });
+  fs.writeFileSync(dropBoxesFile, JSON.stringify(list));
+  dropBoxesDirty = false;
 }
 
-let mapTiles = loadLayer(MAP_FILE, MAP_W, MAP_H);
-let buildingTiles = loadLayer(BUILDINGS_FILE, MAP_W, MAP_H);
-let mapDirty = false;
-let buildingDirty = false;
-
-if (!mapTiles) {
-  mapTiles = new Uint8Array(MAP_W * MAP_H);
-  generateInitialMap();
-  mapDirty = true;
-}
-if (!buildingTiles) {
-  buildingTiles = new Uint8Array(MAP_W * MAP_H);
-  buildingDirty = true;
-}
-
-const tileHp = new Map();
-for (let y = 0; y < MAP_H; y += 1) {
-  for (let x = 0; x < MAP_W; x += 1) {
-    const type = getTile(x, y);
-    const hp = TILE_HP.get(type);
-    if (hp) {
-      tileHp.set(`${x},${y}`, hp);
-    }
-  }
-}
+loadDropBoxes();
 
 function isWalkable(x, y) {
   if (x < 0 || x >= MAP_W || y < 0 || y >= MAP_H) return false;
@@ -219,7 +122,48 @@ function isWalkable(x, y) {
   return getBuilding(x, y) === BUILDING_TYPES.none;
 }
 
-function damageTile(x, y, byId, onCrystalHit) {
+function normalizeSkillSlots(raw) {
+  if (!raw) return [...EMPTY_SKILL_SLOTS];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [...EMPTY_SKILL_SLOTS];
+    const slots = Array.from({ length: SKILL_SLOT_COUNT }, (_, index) => {
+      const value = parsed[index];
+      return typeof value === "string" && value ? value : null;
+    });
+    return slots;
+  } catch {
+    return [...EMPTY_SKILL_SLOTS];
+  }
+}
+
+function serializeSkillSlots(slots) {
+  const normalized = Array.from({ length: SKILL_SLOT_COUNT }, (_, index) => {
+    const value = slots?.[index];
+    return typeof value === "string" && value ? value : null;
+  });
+  return JSON.stringify(normalized);
+}
+
+function isSkillSlotted(player, skillId) {
+  return Array.isArray(player?.skillSlots) && player.skillSlots.includes(skillId);
+}
+
+function isSkillAvailable(player, skill) {
+  if (!skill || skill.locked) return false;
+  if (!Array.isArray(skill.requires) || skill.requires.length === 0) return true;
+  return skill.requires.every((req) => {
+    const level = player.skills?.[req.id]?.level ?? 0;
+    const need = Number(req.level || 0);
+    return level >= need;
+  });
+}
+
+function calcGreenCost(base, level) {
+  return Math.max(1, Math.ceil(base - (Number(level) || 0) * 0.01));
+}
+
+function damageTile(x, y, byId, onCrystalHit, damage = 1) {
   if (x < 0 || x >= MAP_W || y < 0 || y >= MAP_H)
     return { hit: false, broken: false, type: TILE_TYPES.empty };
   const type = getTile(x, y);
@@ -228,189 +172,273 @@ function damageTile(x, y, byId, onCrystalHit) {
     return { hit: false, broken: false, type };
   }
   const key = `${x},${y}`;
-  const current = tileHp.get(key) ?? hpMax;
-  const next = current - 1;
+  const current = getTileHp(x, y) ?? hpMax;
+  const safeDamage = Math.max(0, Number(damage) || 0);
+  const dealt = Math.min(current, safeDamage);
+  const next = current - dealt;
   let amount = 0;
-  if (type !== TILE_TYPES.rock && typeof onCrystalHit === "function") {
-    amount = Number(onCrystalHit(type) || 0);
+  if (dealt > 0 && type !== TILE_TYPES.rock && typeof onCrystalHit === "function") {
+    amount = Number(onCrystalHit(type, dealt) || 0);
   }
   broadcast({ t: "hit", x, y, by: byId, type, amount });
   if (next <= 0) {
     setTile(x, y, TILE_TYPES.empty);
-    tileHp.delete(key);
+    deleteTileHp(x, y);
     broadcast({ t: "tile", x, y, value: TILE_TYPES.empty });
     return { hit: true, broken: true, type, amount };
   }
-  tileHp.set(key, next);
+  setTileHp(x, y, next);
   return { hit: true, broken: false, type, amount };
 }
 
-function isBombBreakable(type, breaksRedRock) {
-  return (
-    type === TILE_TYPES.rock ||
-    type === TILE_TYPES.blackRock ||
-    type === TILE_TYPES.crystalGreen ||
-    type === TILE_TYPES.crystalBlue ||
-    type === TILE_TYPES.crystalWhite ||
-    type === TILE_TYPES.crystalRed ||
-    type === TILE_TYPES.crystalPink ||
-    type === TILE_TYPES.crystalCyan ||
-    (breaksRedRock && type === TILE_TYPES.redRock)
-  );
+
+const {
+  db,
+  stmtInsertUser,
+  stmtGetUser,
+  stmtUpdateUserPos,
+  stmtUpdateExplored,
+  stmtUpdateSkillSlots,
+  stmtUpdateDollars,
+  stmtUpdateHp,
+  stmtUpdateMaxHp,
+  itemUpdateStmts,
+  stmtUpdateCrystalGreen,
+  stmtUpdateCrystalBlue,
+  stmtUpdateCrystalWhite,
+  stmtUpdateCrystalRed,
+  stmtUpdateCrystalPink,
+  stmtUpdateCrystalCyan,
+  skillUpdateStmts
+} = createDb(dataDir);
+
+const playerService = createPlayerService({
+  mapWidth: MAP_W,
+  mapHeight: MAP_H,
+  isWalkable,
+  getSkillConfig,
+  getOverloadPercent,
+  isInventoryNearCapacity,
+  skillUpdateStmts,
+  stmtUpdateHp,
+  stmtUpdateCrystalGreen,
+  stmtUpdateCrystalBlue,
+  stmtUpdateCrystalWhite,
+  stmtUpdateCrystalRed,
+  stmtUpdateCrystalPink,
+  stmtUpdateCrystalCyan,
+  itemUpdateStmts,
+  crystalTileToColor: CRYSTAL_TILE_TO_COLOR
+});
+const {
+  sendToPlayer,
+  sendSkills,
+  syncHpLimits,
+  grantSkillXp,
+  applyDamageToPlayer,
+  applyHealToPlayer,
+  setCrystalCount,
+  awardCrystal,
+  handleMoveXp,
+  buildItemsPayload,
+  setItemCount,
+  grantAdminItems,
+  randomSpawn,
+  validSavedSpawn,
+  normalizeDir
+} = playerService;
+
+function canSpendCrystals(player, costs) {
+  for (const [color, amount] of Object.entries(costs)) {
+    const have = player.inventory?.[color] ?? 0;
+    if (have < amount) return false;
+  }
+  return true;
 }
 
-function explodeBomb(bombId) {
-  const bomb = bombs.get(bombId);
-  if (!bomb) return;
-  bombs.delete(bombId);
-  bombByTile.delete(`${bomb.x},${bomb.y}`);
+function spendCrystals(player, costs) {
+  for (const [color, amount] of Object.entries(costs)) {
+    const have = player.inventory?.[color] ?? 0;
+    setCrystalCount(player, color, have - amount);
+  }
+  sendToPlayer(player, { t: "inventory", inventory: player.inventory });
+}
 
-  const config = BOMB_TYPES[bomb.type] || BOMB_TYPES.bomb;
-  const radius = config.radius;
-  const shape = config.shape;
+function dropCrystals(player, crystals, dropAll) {
+  const targetX = player.tx + player.facingX;
+  const targetY = player.ty + player.facingY;
+  if (targetX < 0 || targetX >= MAP_W || targetY < 0 || targetY >= MAP_H) {
+    sendToPlayer(player, { t: "drop_error", message: "Нет места для сброса." });
+    return false;
+  }
+  if (getTile(targetX, targetY) !== TILE_TYPES.empty) {
+    sendToPlayer(player, { t: "drop_error", message: "Клетка занята." });
+    return false;
+  }
+  if (getBuilding(targetX, targetY) !== BUILDING_TYPES.none) {
+    sendToPlayer(player, { t: "drop_error", message: "Клетка занята." });
+    return false;
+  }
+  if (bombByTile?.has(`${targetX},${targetY}`)) {
+    sendToPlayer(player, { t: "drop_error", message: "Клетка занята." });
+    return false;
+  }
 
+  const payload = {};
+  let total = 0;
+  for (const color of CRYSTAL_COLORS) {
+    const have = player.inventory?.[color] ?? 0;
+    const want = dropAll
+      ? have
+      : Math.max(0, Math.floor(Number(crystals?.[color] || 0)));
+    const amount = Math.min(have, want);
+    payload[color] = amount;
+    total += amount;
+  }
+  if (total <= 0) {
+    sendToPlayer(player, { t: "drop_error", message: "Нечего сбрасывать." });
+    return false;
+  }
+
+  for (const color of CRYSTAL_COLORS) {
+    const amount = payload[color];
+    if (amount > 0) {
+      const have = player.inventory?.[color] ?? 0;
+      setCrystalCount(player, color, have - amount);
+    }
+  }
+  sendToPlayer(player, { t: "inventory", inventory: player.inventory });
+
+  setTile(targetX, targetY, TILE_TYPES.dropBox);
+  setTileHp(targetX, targetY, 1);
+  dropBoxes.set(`${targetX},${targetY}`, payload);
+  dropBoxesDirty = true;
+  broadcast({ t: "tile", x: targetX, y: targetY, value: TILE_TYPES.dropBox });
+  sendToPlayer(player, { t: "drop_ok" });
+  return true;
+}
+
+function collectDropBox(player, x, y) {
+  const key = `${x},${y}`;
+  const stored = dropBoxes.get(key);
+  if (!stored) return;
+  for (const color of CRYSTAL_COLORS) {
+    const amount = Math.max(0, Math.floor(Number(stored[color] || 0)));
+    if (amount <= 0) continue;
+    const have = player.inventory?.[color] ?? 0;
+    setCrystalCount(player, color, have + amount);
+  }
+  sendToPlayer(player, { t: "inventory", inventory: player.inventory });
+  dropBoxes.delete(key);
+  dropBoxesDirty = true;
+}
+
+function dropCrystalsOnDeath(player) {
+  const payload = {};
+  let total = 0;
+  for (const color of CRYSTAL_COLORS) {
+    const amount = Math.max(0, Math.floor(player.inventory?.[color] || 0));
+    payload[color] = amount;
+    total += amount;
+    if (amount > 0) {
+      setCrystalCount(player, color, 0);
+    }
+  }
+  sendToPlayer(player, { t: "inventory", inventory: player.inventory });
+  if (total <= 0) return;
+
+  const key = `${player.tx},${player.ty}`;
+  setTile(player.tx, player.ty, TILE_TYPES.dropBox);
+  setTileHp(player.tx, player.ty, 1);
+  dropBoxes.set(key, payload);
   broadcast({
-    t: "bomb_explode",
-    id: bomb.id,
-    x: bomb.x,
-    y: bomb.y,
-    r: radius,
-    shape,
-    type: bomb.type
+    t: "tile",
+    x: player.tx,
+    y: player.ty,
+    value: TILE_TYPES.dropBox
   });
+  dropBoxesDirty = true;
+}
 
-  const isInBlast = (tx, ty) => {
-    const dx = tx - bomb.x;
-    const dy = ty - bomb.y;
-    if (shape === "cross") {
-      return (
-        (dx === 0 && Math.abs(dy) <= radius) ||
-        (dy === 0 && Math.abs(dx) <= radius)
-      );
-    }
-    return dx * dx + dy * dy <= radius * radius;
-  };
+function handlePlayerDeath(player) {
+  if (!player || player.hp > 0) return false;
+  dropCrystalsOnDeath(player);
+  player.tx = 1;
+  player.ty = 1;
+  player.facingX = 0;
+  player.facingY = 1;
+  player.moveCooldownMs = 0;
+  player.mineCooldownMs = 0;
+  player.depthOverTimerMs = null;
+  player.depthXpTimerMs = null;
+  player.crystalRemainder = {};
+  player.hp = player.maxHp;
+  stmtUpdateUserPos.run(player.tx, player.ty, player.username);
+  stmtUpdateHp.run(player.hp, player.username);
+  sendToPlayer(player, {
+    t: "hp",
+    current: player.hp,
+    max: player.maxHp
+  });
+  return true;
+}
 
-  for (let dy = -radius; dy <= radius; dy += 1) {
-    for (let dx = -radius; dx <= radius; dx += 1) {
-      const tx = bomb.x + dx;
-      const ty = bomb.y + dy;
-      if (tx < 0 || tx >= MAP_W || ty < 0 || ty >= MAP_H) continue;
-      if (!isInBlast(tx, ty)) continue;
-      const type = getTile(tx, ty);
-      if (!isBombBreakable(type, config.breaksRedRock)) continue;
-      setTile(tx, ty, TILE_TYPES.empty);
-      tileHp.delete(`${tx},${ty}`);
-      broadcast({ t: "tile", x: tx, y: ty, value: TILE_TYPES.empty });
-    }
+function handleBuildAction(player) {
+  const targetX = player.tx + player.facingX;
+  const targetY = player.ty + player.facingY;
+  if (targetX < 0 || targetX >= MAP_W || targetY < 0 || targetY >= MAP_H) return;
+  if (getBuilding(targetX, targetY) !== BUILDING_TYPES.none) return;
+
+  const type = getTile(targetX, targetY);
+  if (type === TILE_TYPES.empty) {
+    const config = getSkillConfig("build1");
+    if (!config || !isSkillSlotted(player, "build1")) return;
+    if (!isSkillAvailable(player, config)) return;
+    const level = player.skills?.build1?.level ?? 0;
+    const greenCost = calcGreenCost(3, level);
+    const costs = { green: greenCost };
+    if (!canSpendCrystals(player, costs)) return;
+    spendCrystals(player, costs);
+    setTile(targetX, targetY, TILE_TYPES.buildGreen);
+    setTileHp(targetX, targetY, 5 + level);
+    broadcast({ t: "tile", x: targetX, y: targetY, value: TILE_TYPES.buildGreen });
+    grantSkillXp(player, "build1", 1);
+    return;
   }
 
-  for (const player of players.values()) {
-    if (isInBlast(player.tx, player.ty)) {
-      applyDamageToPlayer(player, BOMB_DAMAGE);
-    }
+  if (type === TILE_TYPES.buildGreen) {
+    const config = getSkillConfig("build2");
+    if (!config || !isSkillSlotted(player, "build2")) return;
+    if (!isSkillAvailable(player, config)) return;
+    const level = player.skills?.build2?.level ?? 0;
+    const greenCost = calcGreenCost(3, level);
+    const costs = { green: greenCost, white: 1 };
+    if (!canSpendCrystals(player, costs)) return;
+    spendCrystals(player, costs);
+    const currentHp = getTileHp(targetX, targetY) ?? TILE_HP.get(type) ?? 0;
+    setTile(targetX, targetY, TILE_TYPES.buildYellow);
+    setTileHp(targetX, targetY, currentHp + 50 + level);
+    broadcast({ t: "tile", x: targetX, y: targetY, value: TILE_TYPES.buildYellow });
+    grantSkillXp(player, "build2", 1);
+    return;
   }
-}
 
-const db = new Database(path.join(dataDir, "themine.db"));
-db.exec(
-  "CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, password_hash TEXT NOT NULL, created_at INTEGER NOT NULL, last_tx INTEGER, last_ty INTEGER, explored_chunks TEXT, dollars INTEGER NOT NULL DEFAULT 0, coins INTEGER NOT NULL DEFAULT 0, hp INTEGER NOT NULL DEFAULT 100, max_hp INTEGER NOT NULL DEFAULT 100, crystal_green INTEGER NOT NULL DEFAULT 0, crystal_blue INTEGER NOT NULL DEFAULT 0, crystal_white INTEGER NOT NULL DEFAULT 0, crystal_red INTEGER NOT NULL DEFAULT 0, crystal_pink INTEGER NOT NULL DEFAULT 0, crystal_cyan INTEGER NOT NULL DEFAULT 0, item_medkit INTEGER NOT NULL DEFAULT 0, item_bomb INTEGER NOT NULL DEFAULT 0, item_plasmabomb INTEGER NOT NULL DEFAULT 0, item_electrobomb INTEGER NOT NULL DEFAULT 0, item_storage INTEGER NOT NULL DEFAULT 0, item_shop INTEGER NOT NULL DEFAULT 0, item_respawn INTEGER NOT NULL DEFAULT 0, item_upgrade INTEGER NOT NULL DEFAULT 0, item_turret INTEGER NOT NULL DEFAULT 0, item_clan_hall INTEGER NOT NULL DEFAULT 0)"
-);
-const userColumns = new Set(
-  db.prepare("PRAGMA table_info(users)").all().map((row) => row.name)
-);
-if (!userColumns.has("last_tx")) {
-  db.exec("ALTER TABLE users ADD COLUMN last_tx INTEGER");
-}
-if (!userColumns.has("last_ty")) {
-  db.exec("ALTER TABLE users ADD COLUMN last_ty INTEGER");
-}
-if (!userColumns.has("explored_chunks")) {
-  db.exec("ALTER TABLE users ADD COLUMN explored_chunks TEXT");
-}
-if (!userColumns.has("dollars")) {
-  db.exec("ALTER TABLE users ADD COLUMN dollars INTEGER NOT NULL DEFAULT 0");
-}
-if (!userColumns.has("coins")) {
-  db.exec("ALTER TABLE users ADD COLUMN coins INTEGER NOT NULL DEFAULT 0");
-}
-if (!userColumns.has("hp")) {
-  db.exec("ALTER TABLE users ADD COLUMN hp INTEGER NOT NULL DEFAULT 100");
-}
-if (!userColumns.has("max_hp")) {
-  db.exec("ALTER TABLE users ADD COLUMN max_hp INTEGER NOT NULL DEFAULT 100");
-}
-if (!userColumns.has("crystal_green")) {
-  db.exec(
-    "ALTER TABLE users ADD COLUMN crystal_green INTEGER NOT NULL DEFAULT 0"
-  );
-}
-if (!userColumns.has("crystal_blue")) {
-  db.exec("ALTER TABLE users ADD COLUMN crystal_blue INTEGER NOT NULL DEFAULT 0");
-}
-if (!userColumns.has("crystal_white")) {
-  db.exec(
-    "ALTER TABLE users ADD COLUMN crystal_white INTEGER NOT NULL DEFAULT 0"
-  );
-}
-if (!userColumns.has("crystal_red")) {
-  db.exec("ALTER TABLE users ADD COLUMN crystal_red INTEGER NOT NULL DEFAULT 0");
-}
-if (!userColumns.has("crystal_pink")) {
-  db.exec("ALTER TABLE users ADD COLUMN crystal_pink INTEGER NOT NULL DEFAULT 0");
-}
-if (!userColumns.has("crystal_cyan")) {
-  db.exec("ALTER TABLE users ADD COLUMN crystal_cyan INTEGER NOT NULL DEFAULT 0");
-}
-for (const item of ITEM_DEFS) {
-  if (!userColumns.has(item.column)) {
-    db.exec(
-      `ALTER TABLE users ADD COLUMN ${item.column} INTEGER NOT NULL DEFAULT 0`
-    );
+  if (type === TILE_TYPES.buildYellow) {
+    const config = getSkillConfig("build3");
+    if (!config || !isSkillSlotted(player, "build3")) return;
+    if (!isSkillAvailable(player, config)) return;
+    const level = player.skills?.build3?.level ?? 0;
+    const greenCost = calcGreenCost(10, level);
+    const costs = { green: greenCost, blue: 1, white: 1, red: 1 };
+    if (!canSpendCrystals(player, costs)) return;
+    spendCrystals(player, costs);
+    const currentHp = getTileHp(targetX, targetY) ?? TILE_HP.get(type) ?? 0;
+    setTile(targetX, targetY, TILE_TYPES.buildRed);
+    setTileHp(targetX, targetY, currentHp + 100 + level);
+    broadcast({ t: "tile", x: targetX, y: targetY, value: TILE_TYPES.buildRed });
+    grantSkillXp(player, "build3", 1);
   }
 }
-const stmtInsertUser = db.prepare(
-  "INSERT INTO users (username, password_hash, created_at, last_tx, last_ty, explored_chunks, dollars, coins, hp, max_hp, crystal_green, crystal_blue, crystal_white, crystal_red, crystal_pink, crystal_cyan) VALUES (?, ?, ?, NULL, NULL, NULL, 0, 0, 100, 100, 0, 0, 0, 0, 0, 0)"
-);
-const stmtGetUser = db.prepare(
-  "SELECT username, password_hash, last_tx, last_ty, explored_chunks, dollars, coins, hp, max_hp, crystal_green, crystal_blue, crystal_white, crystal_red, crystal_pink, crystal_cyan, item_medkit, item_bomb, item_plasmabomb, item_electrobomb, item_storage, item_shop, item_respawn, item_upgrade, item_turret, item_clan_hall FROM users WHERE username = ?"
-);
-const stmtUpdateUserPos = db.prepare(
-  "UPDATE users SET last_tx = ?, last_ty = ? WHERE username = ?"
-);
-const stmtUpdateExplored = db.prepare(
-  "UPDATE users SET explored_chunks = ? WHERE username = ?"
-);
-const stmtUpdateDollars = db.prepare(
-  "UPDATE users SET dollars = ? WHERE username = ?"
-);
-const stmtUpdateHp = db.prepare(
-  "UPDATE users SET hp = ? WHERE username = ?"
-);
-const itemUpdateStmts = new Map(
-  ITEM_DEFS.map((item) => [
-    item.id,
-    db.prepare(`UPDATE users SET ${item.column} = ? WHERE username = ?`)
-  ])
-);
-const stmtUpdateCrystalGreen = db.prepare(
-  "UPDATE users SET crystal_green = ? WHERE username = ?"
-);
-const stmtUpdateCrystalBlue = db.prepare(
-  "UPDATE users SET crystal_blue = ? WHERE username = ?"
-);
-const stmtUpdateCrystalWhite = db.prepare(
-  "UPDATE users SET crystal_white = ? WHERE username = ?"
-);
-const stmtUpdateCrystalRed = db.prepare(
-  "UPDATE users SET crystal_red = ? WHERE username = ?"
-);
-const stmtUpdateCrystalPink = db.prepare(
-  "UPDATE users SET crystal_pink = ? WHERE username = ?"
-);
-const stmtUpdateCrystalCyan = db.prepare(
-  "UPDATE users SET crystal_cyan = ? WHERE username = ?"
-);
 
 const sessions = new Map();
 
@@ -468,7 +496,26 @@ const server = http.createServer((req, res) => {
 
     if (url.pathname === "/register") {
       try {
-        stmtInsertUser.run(username, hash, Date.now());
+        stmtInsertUser.run(
+          username,
+          hash,
+          Date.now(),
+          null,
+          null,
+          null,
+          serializeSkillSlots(EMPTY_SKILL_SLOTS),
+          0,
+          0,
+          BASE_HP,
+          BASE_HP,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          ...SKILL_DEFAULTS
+        );
       } catch (err) {
         if (String(err?.code || "").includes("SQLITE_CONSTRAINT")) {
           res.writeHead(409, { "Content-Type": "application/json" });
@@ -498,67 +545,31 @@ const server = http.createServer((req, res) => {
 const wss = new WebSocket.Server({ server });
 
 const players = new Map();
-const bombs = new Map();
-const bombByTile = new Map();
-let bombSeq = 1;
-const buildings = loadBuildingsMeta();
-let buildingSeq = 1;
-for (const building of buildings) {
-  const match = String(building?.id || "").match(/\d+/);
-  if (match) {
-    const num = Number(match[0]);
-    if (Number.isFinite(num)) {
-      buildingSeq = Math.max(buildingSeq, num + 1);
-    }
-  }
-}
-let buildingsMetaDirty = false;
-for (const building of buildings) {
-  if (building.type === "storage" && !building.storage) {
-    building.storage = {
-      green: 0,
-      blue: 0,
-      white: 0,
-      red: 0,
-      pink: 0,
-      cyan: 0
-    };
-    buildingsMetaDirty = true;
-  }
-  if (!building.owner) {
-    building.owner = "Admin";
-    buildingsMetaDirty = true;
-  }
-}
-
-function randomSpawn() {
-  for (let i = 0; i < 200; i += 1) {
-    const tx = Math.floor(Math.random() * MAP_W);
-    const ty = Math.floor(Math.random() * MAP_H);
-    if (isWalkable(tx, ty)) {
-      return { tx, ty };
-    }
-  }
-  return { tx: 0, ty: 0 };
-}
-
-function validSavedSpawn(tx, ty) {
-  if (!Number.isInteger(tx) || !Number.isInteger(ty)) return false;
-  return isWalkable(tx, ty);
-}
-
-function normalizeDir(dir) {
-  let x = Number(dir?.x || 0);
-  let y = Number(dir?.y || 0);
-  if (!Number.isFinite(x)) x = 0;
-  if (!Number.isFinite(y)) y = 0;
-  x = Math.sign(x);
-  y = Math.sign(y);
-  if (x !== 0 && y !== 0) {
-    y = 0;
-  }
-  return { x, y };
-}
+const bombManager = createBombManager({
+  mapStore,
+  players,
+  broadcast,
+  applyDamageToPlayer
+});
+const { bombByTile, placeBomb } = bombManager;
+const buildingManager = createBuildingManager({
+  dataDir,
+  mapStore,
+  players,
+  bombByTile,
+  broadcast
+});
+const {
+  buildings,
+  placeStorage,
+  placeShop,
+  placeUpgrade,
+  isPlayerInShopCenter,
+  isPlayerInUpgradeCenter,
+  storageAtPlayer,
+  markDirty: markBuildingsDirty,
+  flush: flushBuildings
+} = buildingManager;
 
 function broadcast(payload) {
   const data = JSON.stringify(payload);
@@ -569,29 +580,9 @@ function broadcast(payload) {
   }
 }
 
-function encodeChunk(layer, cx, cy) {
-  const startX = cx * CHUNK_SIZE;
-  const startY = cy * CHUNK_SIZE;
-  if (startX >= MAP_W || startY >= MAP_H || startX < 0 || startY < 0) {
-    return null;
-  }
-  const w = Math.min(CHUNK_SIZE, MAP_W - startX);
-  const h = Math.min(CHUNK_SIZE, MAP_H - startY);
-  const data = new Uint8Array(w * h);
-  for (let y = 0; y < h; y += 1) {
-    const srcStart = (startY + y) * MAP_W + startX;
-    data.set(layer.subarray(srcStart, srcStart + w), y * w);
-  }
-  return { w, h, data };
-}
-
-function encodeBuildingChunk(cx, cy) {
-  return encodeChunk(buildingTiles, cx, cy);
-}
-
 function sendMapChunk(ws, cx, cy) {
-  const chunk = encodeChunk(mapTiles, cx, cy);
-  const buildingChunk = encodeBuildingChunk(cx, cy);
+  const chunk = encodeMapChunk(cx, cy, CHUNK_SIZE);
+  const buildingChunk = encodeBuildingChunk(cx, cy, CHUNK_SIZE);
   if (!chunk || !buildingChunk) return;
   ws.send(
     JSON.stringify({
@@ -605,549 +596,6 @@ function sendMapChunk(ws, cx, cy) {
     })
   );
 }
-
-function sendToPlayer(player, payload) {
-  if (!player?.ws || player.ws.readyState !== WebSocket.OPEN) return;
-  player.ws.send(JSON.stringify(payload));
-}
-
-function applyDamageToPlayer(player, amount) {
-  if (!amount || amount <= 0) return;
-  player.hp = Math.max(0, player.hp - amount);
-  stmtUpdateHp.run(player.hp, player.username);
-  sendToPlayer(player, {
-    t: "hp",
-    current: player.hp,
-    max: player.maxHp
-  });
-}
-
-function applyHealToPlayer(player, amount) {
-  if (!amount || amount <= 0) return;
-  const next = Math.min(player.maxHp, player.hp + amount);
-  if (next === player.hp) return;
-  player.hp = next;
-  stmtUpdateHp.run(player.hp, player.username);
-  sendToPlayer(player, {
-    t: "hp",
-    current: player.hp,
-    max: player.maxHp
-  });
-}
-
-function awardCrystal(player, type) {
-  switch (type) {
-    case TILE_TYPES.crystalGreen:
-      player.inventory.green += 1;
-      stmtUpdateCrystalGreen.run(player.inventory.green, player.username);
-      sendToPlayer(player, { t: "inventory", inventory: player.inventory });
-      return 1;
-    case TILE_TYPES.crystalBlue:
-      player.inventory.blue += 1;
-      stmtUpdateCrystalBlue.run(player.inventory.blue, player.username);
-      sendToPlayer(player, { t: "inventory", inventory: player.inventory });
-      return 1;
-    case TILE_TYPES.crystalWhite:
-      player.inventory.white += 1;
-      stmtUpdateCrystalWhite.run(player.inventory.white, player.username);
-      sendToPlayer(player, { t: "inventory", inventory: player.inventory });
-      return 1;
-    case TILE_TYPES.crystalRed:
-      player.inventory.red += 1;
-      stmtUpdateCrystalRed.run(player.inventory.red, player.username);
-      sendToPlayer(player, { t: "inventory", inventory: player.inventory });
-      return 1;
-    case TILE_TYPES.crystalPink:
-      player.inventory.pink += 1;
-      stmtUpdateCrystalPink.run(player.inventory.pink, player.username);
-      sendToPlayer(player, { t: "inventory", inventory: player.inventory });
-      return 1;
-    case TILE_TYPES.crystalCyan:
-      player.inventory.cyan += 1;
-      stmtUpdateCrystalCyan.run(player.inventory.cyan, player.username);
-      sendToPlayer(player, { t: "inventory", inventory: player.inventory });
-      return 1;
-    default:
-      return 0;
-  }
-}
-
-function setCrystalCount(player, color, count) {
-  const safeCount = Math.max(0, Math.floor(count || 0));
-  player.inventory[color] = safeCount;
-  if (color === "green") {
-    stmtUpdateCrystalGreen.run(safeCount, player.username);
-  } else if (color === "blue") {
-    stmtUpdateCrystalBlue.run(safeCount, player.username);
-  } else if (color === "white") {
-    stmtUpdateCrystalWhite.run(safeCount, player.username);
-  } else if (color === "red") {
-    stmtUpdateCrystalRed.run(safeCount, player.username);
-  } else if (color === "pink") {
-    stmtUpdateCrystalPink.run(safeCount, player.username);
-  } else if (color === "cyan") {
-    stmtUpdateCrystalCyan.run(safeCount, player.username);
-  }
-}
-
-function parseExplored(raw) {
-  if (!raw) return new Set();
-  try {
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return new Set();
-    const set = new Set();
-    for (const entry of parsed) {
-      if (Array.isArray(entry) && entry.length >= 2) {
-        const cx = Number(entry[0]);
-        const cy = Number(entry[1]);
-        if (Number.isFinite(cx) && Number.isFinite(cy)) {
-          set.add(chunkKey(cx, cy));
-        }
-      } else if (typeof entry === "string") {
-        const parts = entry.split(",");
-        const cx = Number(parts[0]);
-        const cy = Number(parts[1]);
-        if (Number.isFinite(cx) && Number.isFinite(cy)) {
-          set.add(chunkKey(cx, cy));
-        }
-      }
-    }
-    return set;
-  } catch {
-    return new Set();
-  }
-}
-
-function encodeExplored(set) {
-  const list = [];
-  for (const key of set) {
-    const parts = key.split(",");
-    const cx = Number(parts[0]);
-    const cy = Number(parts[1]);
-    if (Number.isFinite(cx) && Number.isFinite(cy)) {
-      list.push([cx, cy]);
-    }
-  }
-  return JSON.stringify(list);
-}
-
-function chunkIntersectsView(player, cx, cy) {
-  const x0 = cx * CHUNK_SIZE;
-  const y0 = cy * CHUNK_SIZE;
-  const x1 = Math.min(x0 + CHUNK_SIZE - 1, MAP_W - 1);
-  const y1 = Math.min(y0 + CHUNK_SIZE - 1, MAP_H - 1);
-  const nx = clamp(player.tx, x0, x1);
-  const ny = clamp(player.ty, y0, y1);
-  const dx = player.tx - nx;
-  const dy = player.ty - ny;
-  return dx * dx + dy * dy <= VIEW_RADIUS_TILES * VIEW_RADIUS_TILES;
-}
-
-function exploredPayload(set) {
-  const list = [];
-  for (const key of set) {
-    const parts = key.split(",");
-    const cx = Number(parts[0]);
-    const cy = Number(parts[1]);
-    if (Number.isFinite(cx) && Number.isFinite(cy)) {
-      list.push({ cx, cy });
-    }
-  }
-  return list;
-}
-
-function updateExplored(player) {
-  const maxCx = Math.ceil(MAP_W / CHUNK_SIZE) - 1;
-  const maxCy = Math.ceil(MAP_H / CHUNK_SIZE) - 1;
-  const minX = Math.max(0, player.tx - VIEW_RADIUS_TILES);
-  const maxX = Math.min(MAP_W - 1, player.tx + VIEW_RADIUS_TILES);
-  const minY = Math.max(0, player.ty - VIEW_RADIUS_TILES);
-  const maxY = Math.min(MAP_H - 1, player.ty + VIEW_RADIUS_TILES);
-  const minCx = Math.floor(minX / CHUNK_SIZE);
-  const maxCxView = Math.floor(maxX / CHUNK_SIZE);
-  const minCy = Math.floor(minY / CHUNK_SIZE);
-  const maxCyView = Math.floor(maxY / CHUNK_SIZE);
-  const prev = player.exploreBounds;
-  if (
-    prev &&
-    prev.minCx === minCx &&
-    prev.maxCx === maxCxView &&
-    prev.minCy === minCy &&
-    prev.maxCy === maxCyView
-  ) {
-    return;
-  }
-  player.exploreBounds = {
-    minCx,
-    maxCx: maxCxView,
-    minCy,
-    maxCy: maxCyView
-  };
-  let changed = false;
-  for (let ny = minCy; ny <= maxCyView; ny += 1) {
-    if (ny < 0 || ny > maxCy) continue;
-    for (let nx = minCx; nx <= maxCxView; nx += 1) {
-      if (nx < 0 || nx > maxCx) continue;
-      if (!chunkIntersectsView(player, nx, ny)) continue;
-      const key = chunkKey(nx, ny);
-      if (!player.exploredChunks.has(key)) {
-        player.exploredChunks.add(key);
-        changed = true;
-      }
-    }
-  }
-  if (changed) {
-    player.exploredDirty = true;
-  }
-}
-
-function buildItemsPayload(items) {
-  return ITEM_DEFS.map((item) => ({
-    id: item.id,
-    name: item.name,
-    count: items[item.id] ?? 0
-  }));
-}
-
-function setItemCount(player, itemId, count) {
-  const stmt = itemUpdateStmts.get(itemId);
-  if (!stmt) return;
-  const safeCount = Math.max(0, Math.floor(count || 0));
-  player.items[itemId] = safeCount;
-  stmt.run(safeCount, player.username);
-}
-
-function grantAdminItems(player) {
-  if (player.username !== "Admin") return;
-  for (const item of ITEM_DEFS) {
-    setItemCount(player, item.id, 5);
-  }
-}
-
-function placeBomb(player, x, y, type) {
-  if (!BOMB_TYPES[type]) return false;
-  if (!Number.isInteger(x) || !Number.isInteger(y)) return false;
-  if (x < 0 || x >= MAP_W || y < 0 || y >= MAP_H) return false;
-  if (getTile(x, y) !== TILE_TYPES.empty) return false;
-  if (getBuilding(x, y) !== BUILDING_TYPES.none) return false;
-  if (bombByTile.has(`${x},${y}`)) return false;
-  if ((player.items[type] ?? 0) <= 0) return false;
-
-  setItemCount(player, type, (player.items[type] ?? 0) - 1);
-  sendToPlayer(player, { t: "items", items: buildItemsPayload(player.items) });
-
-  const id = `b${bombSeq++}`;
-  const bomb = { id, x, y, ownerId: player.id, type };
-  bombs.set(id, bomb);
-  bombByTile.set(`${x},${y}`, id);
-  broadcast({ t: "bomb_placed", id, x, y, by: player.id, type });
-  setTimeout(() => explodeBomb(id), BOMB_DELAY_MS);
-  return true;
-}
-
-function canPlaceStorage(entranceX, entranceY, player) {
-  const width = 3;
-  const height = 2;
-  const topLeftX = entranceX - 1;
-  const topLeftY = entranceY - 1;
-  if (
-    topLeftX < 0 ||
-    topLeftY < 0 ||
-    topLeftX + width > MAP_W ||
-    topLeftY + height > MAP_H
-  ) {
-    return false;
-  }
-  const occupied = new Set();
-  for (const p of players.values()) {
-    if (player && p.id === player.id) continue;
-    occupied.add(`${p.tx},${p.ty}`);
-  }
-  const checkX0 = topLeftX - 1;
-  const checkY0 = topLeftY - 1;
-  const checkX1 = topLeftX + width;
-  const checkY1 = topLeftY + height;
-  if (
-    checkX0 < 0 ||
-    checkY0 < 0 ||
-    checkX1 >= MAP_W ||
-    checkY1 >= MAP_H
-  ) {
-    return false;
-  }
-  for (let y = checkY0; y <= checkY1; y += 1) {
-    for (let x = checkX0; x <= checkX1; x += 1) {
-      if (getTile(x, y) !== TILE_TYPES.empty) return false;
-      if (getBuilding(x, y) !== BUILDING_TYPES.none) return false;
-      if (bombByTile.has(`${x},${y}`)) return false;
-      if (occupied.has(`${x},${y}`)) return false;
-    }
-  }
-  return true;
-}
-
-function placeStorage(player, entranceX, entranceY) {
-  if (!Number.isInteger(entranceX) || !Number.isInteger(entranceY)) return false;
-  if (player.facingX !== 0 || player.facingY !== -1) return false;
-  if (!canPlaceStorage(entranceX, entranceY, player)) return false;
-  if ((player.items.storage ?? 0) <= 0) return false;
-
-  setItemCount(player, "storage", (player.items.storage ?? 0) - 1);
-  sendToPlayer(player, { t: "items", items: buildItemsPayload(player.items) });
-
-  const width = 3;
-  const height = 2;
-  const topLeftX = entranceX - 1;
-  const topLeftY = entranceY - 1;
-  const tiles = [];
-  for (let y = topLeftY; y < topLeftY + height; y += 1) {
-    for (let x = topLeftX; x < topLeftX + width; x += 1) {
-      if (x === entranceX && y === entranceY) continue;
-      setBuilding(x, y, BUILDING_TYPES.storage);
-      tiles.push({ x, y, value: BUILDING_TYPES.storage });
-    }
-  }
-
-  const building = {
-    id: `s${buildingSeq++}`,
-    type: "storage",
-    x: topLeftX,
-    y: topLeftY,
-    w: width,
-    h: height,
-    entrance: { x: entranceX, y: entranceY },
-    owner: player.username,
-    storage: {
-      green: 0,
-      blue: 0,
-      white: 0,
-      red: 0,
-      pink: 0,
-      cyan: 0
-    }
-  };
-  buildings.push(building);
-  buildingsMetaDirty = true;
-  broadcast({ t: "building_place", building, tiles });
-  return true;
-}
-
-function canPlaceShop(centerX, centerY, player) {
-  const radius = 2;
-  const topLeftX = centerX - radius;
-  const topLeftY = centerY - radius;
-  const size = radius * 2 + 1;
-  if (
-    topLeftX < 0 ||
-    topLeftY < 0 ||
-    topLeftX + size > MAP_W ||
-    topLeftY + size > MAP_H
-  ) {
-    return false;
-  }
-  const occupied = new Set();
-  for (const p of players.values()) {
-    if (player && p.id === player.id) continue;
-    occupied.add(`${p.tx},${p.ty}`);
-  }
-  const checkX0 = topLeftX - 1;
-  const checkY0 = topLeftY - 1;
-  const checkX1 = topLeftX + size;
-  const checkY1 = topLeftY + size;
-  if (
-    checkX0 < 0 ||
-    checkY0 < 0 ||
-    checkX1 >= MAP_W ||
-    checkY1 >= MAP_H
-  ) {
-    return false;
-  }
-  for (let y = checkY0; y <= checkY1; y += 1) {
-    for (let x = checkX0; x <= checkX1; x += 1) {
-      if (getTile(x, y) !== TILE_TYPES.empty) return false;
-      if (getBuilding(x, y) !== BUILDING_TYPES.none) return false;
-      if (bombByTile.has(`${x},${y}`)) return false;
-      if (occupied.has(`${x},${y}`)) return false;
-    }
-  }
-  return true;
-}
-
-function placeShop(player, centerX, centerY) {
-  if (!Number.isInteger(centerX) || !Number.isInteger(centerY)) return false;
-  if (player.facingX !== 0 || player.facingY !== -1) return false;
-  if (!canPlaceShop(centerX, centerY, player)) return false;
-  if ((player.items.shop ?? 0) <= 0) return false;
-
-  setItemCount(player, "shop", (player.items.shop ?? 0) - 1);
-  sendToPlayer(player, { t: "items", items: buildItemsPayload(player.items) });
-
-  const radius = 2;
-  const topLeftX = centerX - radius;
-  const topLeftY = centerY - radius;
-  const tiles = [];
-  for (let y = topLeftY; y <= centerY + radius; y += 1) {
-    for (let x = topLeftX; x <= centerX + radius; x += 1) {
-      const onCross =
-        (x === centerX && Math.abs(y - centerY) <= radius) ||
-        (y === centerY && Math.abs(x - centerX) <= radius);
-      const isCorner =
-        (x === topLeftX && y === topLeftY) ||
-        (x === topLeftX && y === centerY + radius) ||
-        (x === centerX + radius && y === topLeftY) ||
-        (x === centerX + radius && y === centerY + radius);
-      if (onCross || isCorner) continue;
-      setBuilding(x, y, BUILDING_TYPES.shop);
-      tiles.push({ x, y, value: BUILDING_TYPES.shop });
-    }
-  }
-
-  const entrances = [
-    { x: centerX, y: centerY - radius },
-    { x: centerX, y: centerY + radius },
-    { x: centerX - radius, y: centerY },
-    { x: centerX + radius, y: centerY }
-  ];
-
-  const building = {
-    id: `m${buildingSeq++}`,
-    type: "shop",
-    x: topLeftX,
-    y: topLeftY,
-    w: radius * 2 + 1,
-    h: radius * 2 + 1,
-    center: { x: centerX, y: centerY },
-    entrances,
-    owner: player.username
-  };
-  buildings.push(building);
-  buildingsMetaDirty = true;
-  broadcast({ t: "building_place", building, tiles });
-  return true;
-}
-
-function canPlaceUpgrade(entranceX, entranceY, player) {
-  const width = 3;
-  const height = 3;
-  const topLeftX = entranceX - 1;
-  const topLeftY = entranceY - 2;
-  if (
-    topLeftX < 0 ||
-    topLeftY < 0 ||
-    topLeftX + width > MAP_W ||
-    topLeftY + height > MAP_H
-  ) {
-    return false;
-  }
-  const occupied = new Set();
-  for (const p of players.values()) {
-    if (player && p.id === player.id) continue;
-    occupied.add(`${p.tx},${p.ty}`);
-  }
-  const checkX0 = topLeftX - 1;
-  const checkY0 = topLeftY - 1;
-  const checkX1 = topLeftX + width;
-  const checkY1 = topLeftY + height;
-  if (
-    checkX0 < 0 ||
-    checkY0 < 0 ||
-    checkX1 >= MAP_W ||
-    checkY1 >= MAP_H
-  ) {
-    return false;
-  }
-  for (let y = checkY0; y <= checkY1; y += 1) {
-    for (let x = checkX0; x <= checkX1; x += 1) {
-      if (getTile(x, y) !== TILE_TYPES.empty) return false;
-      if (getBuilding(x, y) !== BUILDING_TYPES.none) return false;
-      if (bombByTile.has(`${x},${y}`)) return false;
-      if (occupied.has(`${x},${y}`)) return false;
-    }
-  }
-  return true;
-}
-
-function placeUpgrade(player, entranceX, entranceY) {
-  if (!Number.isInteger(entranceX) || !Number.isInteger(entranceY)) return false;
-  if (player.facingX !== 0 || player.facingY !== -1) return false;
-  if (!canPlaceUpgrade(entranceX, entranceY, player)) return false;
-  if ((player.items.upgrade ?? 0) <= 0) return false;
-
-  setItemCount(player, "upgrade", (player.items.upgrade ?? 0) - 1);
-  sendToPlayer(player, { t: "items", items: buildItemsPayload(player.items) });
-
-  const width = 3;
-  const height = 3;
-  const topLeftX = entranceX - 1;
-  const topLeftY = entranceY - 2;
-  const centerX = entranceX;
-  const centerY = entranceY - 1;
-  const tiles = [];
-  for (let y = topLeftY; y < topLeftY + height; y += 1) {
-    for (let x = topLeftX; x < topLeftX + width; x += 1) {
-      if (x === entranceX && y === entranceY) continue;
-      if (x === centerX && y === centerY) continue;
-      setBuilding(x, y, BUILDING_TYPES.upgrade);
-      tiles.push({ x, y, value: BUILDING_TYPES.upgrade });
-    }
-  }
-
-  const building = {
-    id: `u${buildingSeq++}`,
-    type: "upgrade",
-    x: topLeftX,
-    y: topLeftY,
-    w: width,
-    h: height,
-    entrance: { x: entranceX, y: entranceY },
-    center: { x: centerX, y: centerY },
-    owner: player.username
-  };
-  buildings.push(building);
-  buildingsMetaDirty = true;
-  broadcast({ t: "building_place", building, tiles });
-  return true;
-}
-
-function isPlayerInShopCenter(player) {
-  if (!player) return false;
-  for (const building of buildings) {
-    if (building.type !== "shop") continue;
-    if (building.center?.x === player.tx && building.center?.y === player.ty) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function storageAtPlayer(player) {
-  if (!player) return null;
-  for (const building of buildings) {
-    if (building.type !== "storage") continue;
-    if (
-      building.entrance?.x === player.tx &&
-      building.entrance?.y === player.ty
-    ) {
-      if (building.owner && building.owner !== player.username) {
-        return null;
-      }
-      if (!building.storage) {
-        building.storage = {
-          green: 0,
-          blue: 0,
-          white: 0,
-          red: 0,
-          pink: 0,
-          cyan: 0
-        };
-        buildingsMetaDirty = true;
-      }
-      return building;
-    }
-  }
-  return null;
-}
-
 wss.on("connection", (ws, req) => {
   const url = new URL(req.url || "/", "http://localhost");
   const token = url.searchParams.get("token");
@@ -1156,12 +604,33 @@ wss.on("connection", (ws, req) => {
     ws.close(4001, "unauthorized");
     return;
   }
+  for (const existing of players.values()) {
+    if (existing.username === session.username) {
+      ws.close(4002, "already_online");
+      return;
+    }
+  }
 
   const id = crypto.randomUUID();
   const saved = stmtGetUser.get(session.username);
+  const skills = {};
+  for (const skill of SKILL_DEFS) {
+    const levelKey = `skill_${skill.id}_level`;
+    const xpKey = `skill_${skill.id}_xp`;
+    skills[skill.id] = {
+      level: saved?.[levelKey] ?? 0,
+      xp: saved?.[xpKey] ?? 0
+    };
+  }
+  const skillSlots = normalizeSkillSlots(saved?.skill_slots);
   const spawn = validSavedSpawn(saved?.last_tx, saved?.last_ty)
     ? { tx: saved.last_tx, ty: saved.last_ty }
     : randomSpawn();
+  const savedHp = saved?.hp ?? BASE_HP;
+  const savedMaxHp = saved?.max_hp ?? BASE_HP;
+  const skillHpLevel = skills.hp?.level ?? 0;
+  const computedMaxHp = Math.max(savedMaxHp, BASE_HP + skillHpLevel);
+  const currentHp = Math.min(savedHp, computedMaxHp);
   const player = {
     id,
     username: session.username,
@@ -1170,7 +639,8 @@ wss.on("connection", (ws, req) => {
     ty: spawn.ty,
     inputDirX: 0,
     inputDirY: 0,
-    inputCtrl: false,
+    inputRotate: false,
+    inputSlow: false,
     inputMine: false,
     facingX: 0,
     facingY: 1,
@@ -1178,8 +648,8 @@ wss.on("connection", (ws, req) => {
     mineCooldownMs: 0,
     dollars: saved?.dollars ?? 0,
     coins: saved?.coins ?? 0,
-    hp: saved?.hp ?? 100,
-    maxHp: saved?.max_hp ?? 100,
+    hp: currentHp,
+    maxHp: computedMaxHp,
     inventory: {
       green: saved?.crystal_green ?? 0,
       blue: saved?.crystal_blue ?? 0,
@@ -1188,6 +658,13 @@ wss.on("connection", (ws, req) => {
       pink: saved?.crystal_pink ?? 0,
       cyan: saved?.crystal_cyan ?? 0
     },
+    skills,
+    skillSlots,
+    moveTilesSinceXp: 0,
+    inventoryTilesSinceXp: 0,
+    crystalRemainder: {},
+    depthOverTimerMs: null,
+    depthXpTimerMs: null,
     exploredChunks: parseExplored(saved?.explored_chunks),
     exploredDirty: false,
     exploreBounds: null,
@@ -1209,6 +686,13 @@ wss.on("connection", (ws, req) => {
   players.set(id, player);
   ws.playerId = id;
 
+  if (savedMaxHp !== computedMaxHp) {
+    stmtUpdateMaxHp.run(computedMaxHp, player.username);
+  }
+  if (savedHp !== currentHp) {
+    stmtUpdateHp.run(currentHp, player.username);
+  }
+
   ws.send(
     JSON.stringify({
       t: "welcome",
@@ -1224,6 +708,9 @@ wss.on("connection", (ws, req) => {
       wallet: { dollars: player.dollars, coins: player.coins },
       hp: { current: player.hp, max: player.maxHp },
       inventory: { ...player.inventory },
+      skills: player.skills,
+      skillSlots: player.skillSlots,
+      skillConfig: SKILL_DEFS,
       items: buildItemsPayload(player.items),
       buildings,
       explored: exploredPayload(player.exploredChunks)
@@ -1240,7 +727,8 @@ wss.on("connection", (ws, req) => {
 
     if (msg.t === "input") {
       const dir = normalizeDir(msg.dir);
-      player.inputCtrl = Boolean(msg.ctrl);
+      player.inputSlow = Boolean(msg.ctrl);
+      player.inputRotate = Boolean(msg.shift);
       player.inputMine = Boolean(msg.mine);
       player.inputDirX = dir.x;
       player.inputDirY = dir.y;
@@ -1292,7 +780,12 @@ wss.on("connection", (ws, req) => {
       const x = Number(msg.x);
       const y = Number(msg.y);
       const type = String(msg.id || "bomb");
-      placeBomb(player, x, y, type);
+      placeBomb(player, x, y, type, (p, itemId) => {
+        if ((p.items[itemId] ?? 0) <= 0) return false;
+        setItemCount(p, itemId, (p.items[itemId] ?? 0) - 1);
+        sendToPlayer(p, { t: "items", items: buildItemsPayload(p.items) });
+        return true;
+      });
     }
 
     if (msg.t === "place_building") {
@@ -1300,16 +793,35 @@ wss.on("connection", (ws, req) => {
       const entranceX = Number(msg.x);
       const entranceY = Number(msg.y);
       if (type === "storage") {
-        placeStorage(player, entranceX, entranceY);
+        if ((player.items.storage ?? 0) <= 0) return;
+        if (!placeStorage(player, entranceX, entranceY)) return;
+        setItemCount(player, "storage", (player.items.storage ?? 0) - 1);
+        sendToPlayer(player, { t: "items", items: buildItemsPayload(player.items) });
         return;
       }
       if (type === "shop") {
-        placeShop(player, entranceX, entranceY);
+        if ((player.items.shop ?? 0) <= 0) return;
+        if (!placeShop(player, entranceX, entranceY)) return;
+        setItemCount(player, "shop", (player.items.shop ?? 0) - 1);
+        sendToPlayer(player, { t: "items", items: buildItemsPayload(player.items) });
         return;
       }
       if (type === "upgrade") {
-        placeUpgrade(player, entranceX, entranceY);
+        if ((player.items.upgrade ?? 0) <= 0) return;
+        if (!placeUpgrade(player, entranceX, entranceY)) return;
+        setItemCount(player, "upgrade", (player.items.upgrade ?? 0) - 1);
+        sendToPlayer(player, { t: "items", items: buildItemsPayload(player.items) });
       }
+    }
+
+    if (msg.t === "build_action") {
+      handleBuildAction(player);
+    }
+
+    if (msg.t === "drop_crystals") {
+      const all = Boolean(msg.all);
+      const crystals = msg.crystals || {};
+      dropCrystals(player, crystals, all);
     }
 
     if (msg.t === "shop_sell") {
@@ -1339,9 +851,9 @@ wss.on("connection", (ws, req) => {
       if (!basePrice) return;
       const amount = Math.max(1, Math.floor(Number(msg.amount || 1)));
       const price = basePrice * 2;
+      const current = player.inventory[crystal] ?? 0;
       const cost = price * amount;
       if (player.dollars < cost) return;
-      const current = player.inventory[crystal] ?? 0;
       const next = current + amount;
       setCrystalCount(player, crystal, next);
       player.dollars -= cost;
@@ -1387,13 +899,70 @@ wss.on("connection", (ws, req) => {
       } else {
         return;
       }
-      buildingsMetaDirty = true;
+      markBuildingsDirty();
       sendToPlayer(player, { t: "inventory", inventory: player.inventory });
       sendToPlayer(player, {
         t: "storage_state",
         id: storage.id,
         storage: { ...storage.storage }
       });
+    }
+
+    if (msg.t === "skill_slot_set") {
+      if (!isPlayerInUpgradeCenter(player)) return;
+      const slot = Number(msg.slot);
+      const id = String(msg.id || "");
+      if (!Number.isInteger(slot) || slot < 0 || slot >= SKILL_SLOT_COUNT) return;
+      const config = getSkillConfig(id);
+      if (!config || !config.slotOnly) return;
+      if (!isSkillAvailable(player, config)) return;
+      const already = isSkillSlotted(player, id);
+      if (already && player.skillSlots[slot] !== id) return;
+      player.skillSlots[slot] = id;
+      stmtUpdateSkillSlots.run(
+        serializeSkillSlots(player.skillSlots),
+        player.username
+      );
+      sendToPlayer(player, { t: "skill_slots", slots: player.skillSlots });
+    }
+
+    if (msg.t === "skill_upgrade") {
+      if (!isPlayerInUpgradeCenter(player)) return;
+      const id = String(msg.id || "");
+      const config = getSkillConfig(id);
+      if (!config || config.locked) return;
+      if (config.slotOnly && !isSkillSlotted(player, id)) return;
+      const skill = player.skills?.[id];
+      if (!skill) return;
+      const xpNeed = getSkillXpNeed(config, skill.level);
+      const cost = getSkillCost(config, skill.level);
+      if (skill.xp < xpNeed) return;
+      if (player.dollars < cost) return;
+      skill.xp -= xpNeed;
+      skill.level += 1;
+      const stmts = skillUpdateStmts.get(id);
+      if (stmts?.xp) {
+        stmts.xp.run(skill.xp, player.username);
+      }
+      if (stmts?.level) {
+        stmts.level.run(skill.level, player.username);
+      }
+      player.dollars -= cost;
+      stmtUpdateDollars.run(player.dollars, player.username);
+      sendToPlayer(player, {
+        t: "wallet",
+        dollars: player.dollars,
+        coins: player.coins
+      });
+      if (id === "hp") {
+        const nextMax = Math.max(player.maxHp, BASE_HP + skill.level);
+        if (nextMax !== player.maxHp) {
+          player.maxHp = nextMax;
+          stmtUpdateMaxHp.run(player.maxHp, player.username);
+        }
+        syncHpLimits(player);
+      }
+      sendSkills(player);
     }
   });
 
@@ -1424,6 +993,38 @@ setInterval(() => {
       player.mineCooldownMs = Math.max(0, player.mineCooldownMs - dtMs);
     }
 
+    const maxDepth = getMaxDepth(player);
+    const overDepth = Math.max(0, player.ty - maxDepth);
+    const nearDepth = player.ty >= maxDepth - 20;
+    if (overDepth > 0) {
+      if (player.depthOverTimerMs == null) {
+        player.depthOverTimerMs = DEPTH_OVERLOAD_INTERVAL_MS;
+      } else {
+        player.depthOverTimerMs -= dtMs;
+      }
+      while (player.depthOverTimerMs != null && player.depthOverTimerMs <= 0) {
+        applyDamageToPlayer(player, overDepth);
+        player.depthOverTimerMs += DEPTH_OVERLOAD_INTERVAL_MS;
+      }
+    } else {
+      player.depthOverTimerMs = null;
+    }
+
+    if (nearDepth) {
+      if (player.depthXpTimerMs == null) {
+        player.depthXpTimerMs = DEPTH_OVERLOAD_INTERVAL_MS;
+      } else {
+        player.depthXpTimerMs -= dtMs;
+      }
+      const multiplier = overDepth > 0 ? 2 : 1;
+      while (player.depthXpTimerMs != null && player.depthXpTimerMs <= 0) {
+        grantSkillXp(player, "depth", multiplier);
+        player.depthXpTimerMs += DEPTH_OVERLOAD_INTERVAL_MS;
+      }
+    } else {
+      player.depthXpTimerMs = null;
+    }
+
     const wantsMove =
       player.inputDirX !== 0 || player.inputDirY !== 0;
 
@@ -1437,10 +1038,34 @@ setInterval(() => {
       if (type !== TILE_TYPES.empty) {
         const hpMax = TILE_HP.get(type);
         if (hpMax) {
-          const result = damageTile(x, y, player.id, (hitType) =>
-            awardCrystal(player, hitType)
+          const isBuildTile =
+            type === TILE_TYPES.buildGreen ||
+            type === TILE_TYPES.buildYellow ||
+            type === TILE_TYPES.buildRed;
+          const isDropBox = type === TILE_TYPES.dropBox;
+          let damage = getMiningDamage(player);
+          if (isBuildTile) {
+            const demoLevel = player.skills?.demolisher?.level ?? 0;
+            damage += demoLevel * 0.5;
+          }
+          const result = damageTile(
+            x,
+            y,
+            player.id,
+            (hitType, dealt) => awardCrystal(player, hitType, dealt),
+            damage
           );
           if (result.hit) {
+            if (result.broken) {
+              if (isDropBox) {
+                collectDropBox(player, x, y);
+              } else {
+                grantSkillXp(player, "mining", 1);
+                if (isBuildTile) {
+                  grantSkillXp(player, "demolisher", 1);
+                }
+              }
+            }
             player.mineCooldownMs = MINE_COOLDOWN_MS;
             return true;
           }
@@ -1472,7 +1097,7 @@ setInterval(() => {
       return true;
     };
 
-    if (player.inputCtrl) {
+    if (player.inputRotate) {
       if (wantsMove) {
         if (player.facingX !== desiredX || player.facingY !== desiredY) {
           player.facingX = desiredX;
@@ -1495,17 +1120,18 @@ setInterval(() => {
     if (wantsMove && player.moveCooldownMs === 0) {
       const nextX = player.tx + desiredX;
       const nextY = player.ty + desiredY;
-      let moved = false;
+      let movedTiles = 0;
       if (desiredX !== 0 && isWalkable(nextX, player.ty)) {
         player.tx = nextX;
-        moved = true;
+        movedTiles += 1;
       }
       if (desiredY !== 0 && isWalkable(player.tx, nextY)) {
         player.ty = nextY;
-        moved = true;
+        movedTiles += 1;
       }
-      if (moved) {
-        player.moveCooldownMs = STEP_DELAY_MS;
+      if (movedTiles > 0) {
+        player.moveCooldownMs = getMoveStepDelayMs(player);
+        handleMoveXp(player, movedTiles);
       } else {
         const mineX = player.tx + desiredX;
         const mineY = player.ty + desiredY;
@@ -1517,6 +1143,9 @@ setInterval(() => {
       tryMine(mineX, mineY);
     }
 
+    if (player.hp <= 0) {
+      handlePlayerDeath(player);
+    }
     updateExplored(player);
   }
 
@@ -1537,17 +1166,10 @@ setInterval(() => {
 }, tickIntervalMs);
 
 setInterval(() => {
-  if (mapDirty) {
-    saveLayer(MAP_FILE, mapTiles, MAP_W, MAP_H);
-    mapDirty = false;
-  }
-  if (buildingDirty) {
-    saveLayer(BUILDINGS_FILE, buildingTiles, MAP_W, MAP_H);
-    buildingDirty = false;
-  }
-  if (buildingsMetaDirty) {
-    saveBuildingsMeta(buildings);
-    buildingsMetaDirty = false;
+  flushDirty();
+  flushBuildings();
+  if (dropBoxesDirty) {
+    saveDropBoxes();
   }
   for (const player of players.values()) {
     if (player.exploredDirty) {

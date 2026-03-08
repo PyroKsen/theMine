@@ -309,6 +309,27 @@ html, body, #root {
   color: #9bb0c6;
 }
 
+.inventory-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.inventory-drop-btn {
+  background: rgba(10, 14, 20, 0.7);
+  border: 1px solid #2a3647;
+  color: #c5d2e4;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.inventory-drop-btn:hover {
+  border-color: #3b4a60;
+}
+
 .inventory-list {
   display: flex;
   flex-direction: column;
@@ -485,6 +506,78 @@ html, body, #root {
   gap: 8px;
 }
 
+.drop-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.drop-error {
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 120, 120, 0.35);
+  background: rgba(60, 18, 18, 0.55);
+  color: #ff8c8c;
+  font-size: 12px;
+}
+
+.drop-row {
+  display: grid;
+  grid-template-columns: 1fr 0.6fr;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid #1f2a3a;
+  border-radius: 8px;
+  background: rgba(10, 14, 20, 0.6);
+}
+
+.drop-info {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #cfe1f7;
+}
+
+.drop-name {
+  font-weight: 700;
+}
+
+.drop-have {
+  color: #8aa0b6;
+}
+
+.drop-input {
+  width: 100%;
+  background: #0f1620;
+  border: 1px solid #1f2a3a;
+  border-radius: 6px;
+  padding: 3px 6px;
+  color: #e8eef5;
+  font-size: 11px;
+  appearance: textfield;
+}
+
+.drop-input:focus {
+  outline: none;
+  border-color: #3d546d;
+}
+
+.drop-input::-webkit-outer-spin-button,
+.drop-input::-webkit-inner-spin-button {
+  appearance: none;
+  margin: 0;
+}
+
+.drop-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 6px;
+}
+
 .storage-row {
   display: grid;
   grid-template-columns: 1.6fr 0.5fr 0.9fr;
@@ -561,6 +654,210 @@ html, body, #root {
 .upgrade-body,
 .upgrade-manage {
   min-height: 160px;
+}
+
+.upgrade-body {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 16px;
+  align-items: center;
+}
+
+.upgrade-ring {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.skill-ring {
+  position: relative;
+  width: 220px;
+  height: 220px;
+}
+
+.skill-ring-slot {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1px solid #2a3647;
+  background: rgba(10, 14, 20, 0.65);
+  transform: translate(-50%, -50%);
+  cursor: pointer;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: inherit;
+  color: inherit;
+  appearance: none;
+  outline: none;
+}
+
+.skill-ring-slot.has-skill {
+  width: 18px;
+  height: 18px;
+  border-color: #4cc2ff;
+  background: rgba(76, 194, 255, 0.25);
+}
+
+.skill-ring-slot.is-selected {
+  border-color: #53f5a5;
+  box-shadow: 0 0 6px rgba(83, 245, 165, 0.4);
+}
+
+.skill-ring-slot-label {
+  font-size: 9px;
+  font-weight: 700;
+  color: #e8eef5;
+}
+
+.skill-core {
+  position: absolute;
+  width: 140px;
+  height: 140px;
+  left: 40px;
+  top: 40px;
+}
+
+.skill-node {
+  position: absolute;
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  border: 1px solid #2a3647;
+  background: rgba(14, 20, 30, 0.9);
+  color: #cfe1f7;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  font-size: 11px;
+  cursor: pointer;
+  transform: translate(-50%, -50%);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.skill-node.is-selected {
+  border-color: #53f5a5;
+  box-shadow: 0 0 10px rgba(83, 245, 165, 0.35);
+}
+
+.skill-node.is-locked {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.skill-node-label {
+  font-weight: 700;
+}
+
+.skill-node-level {
+  font-size: 10px;
+  color: #8aa0b6;
+}
+
+.upgrade-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 6px 4px;
+}
+
+.slot-skill-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.slot-skill-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid #1f2a3a;
+  background: rgba(10, 14, 20, 0.6);
+  color: #9bb0c6;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.slot-skill-item.is-available {
+  color: #e8eef5;
+  border-color: #2f4056;
+  background: rgba(18, 26, 36, 0.7);
+}
+
+.slot-skill-item.is-locked {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.slot-skill-item.is-selected {
+  border-color: #53f5a5;
+  box-shadow: 0 0 8px rgba(83, 245, 165, 0.25);
+}
+
+.slot-skill-item.is-installed {
+  border-color: #4cc2ff;
+}
+
+.slot-skill-name {
+  font-weight: 700;
+}
+
+.slot-skill-short {
+  font-size: 11px;
+  color: #7f93aa;
+}
+
+.slot-skill-desc {
+  font-size: 12px;
+  color: #9db1c8;
+}
+
+.upgrade-skill-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #e8eef5;
+}
+
+.upgrade-skill-desc {
+  font-size: 12px;
+  color: #9db1c8;
+}
+
+.upgrade-skill-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: #cfe1f7;
+}
+
+.upgrade-skill-hint {
+  font-size: 11px;
+  color: #7f93aa;
+}
+
+.upgrade-btn {
+  align-self: flex-start;
+  border: 1px solid #2a3647;
+  background: rgba(10, 14, 20, 0.8);
+  color: #cfe1f7;
+  border-radius: 8px;
+  padding: 6px 14px;
+  font-weight: 700;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.upgrade-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .shop-tabs {

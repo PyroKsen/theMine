@@ -1,0 +1,208 @@
+const fs = require("fs");
+const path = require("path");
+const {
+  MAP_W,
+  MAP_H,
+  TILE_TYPES,
+  TILE_HP
+} = require("./config");
+
+const MAP_MAGIC = "TMAP";
+const MAP_VERSION = 1;
+
+function layerIndex(x, y) {
+  return y * MAP_W + x;
+}
+
+function loadLayer(filePath, expectedW, expectedH) {
+  if (!fs.existsSync(filePath)) return null;
+  try {
+    const buf = fs.readFileSync(filePath);
+    if (buf.length < 12) return null;
+    const magic = buf.subarray(0, 4).toString("ascii");
+    if (magic !== MAP_MAGIC) return null;
+    const version = buf.readUInt16LE(4);
+    const w = buf.readUInt16LE(6);
+    const h = buf.readUInt16LE(8);
+    if (version !== MAP_VERSION || w !== expectedW || h !== expectedH) {
+      return null;
+    }
+    const data = buf.subarray(12);
+    if (data.length !== w * h) return null;
+    return new Uint8Array(data);
+  } catch {
+    return null;
+  }
+}
+
+function saveLayer(filePath, layer, w, h) {
+  const header = Buffer.alloc(12);
+  header.write(MAP_MAGIC, 0, "ascii");
+  header.writeUInt16LE(MAP_VERSION, 4);
+  header.writeUInt16LE(w, 6);
+  header.writeUInt16LE(h, 8);
+  header.writeUInt16LE(0, 10);
+  const body = Buffer.from(layer.buffer, layer.byteOffset, layer.byteLength);
+  fs.writeFileSync(filePath, Buffer.concat([header, body]));
+}
+
+function encodeChunk(layer, cx, cy, chunkSize = 64) {
+  const startX = cx * chunkSize;
+  const startY = cy * chunkSize;
+  if (startX >= MAP_W || startY >= MAP_H) return null;
+  const w = Math.min(chunkSize, MAP_W - startX);
+  const h = Math.min(chunkSize, MAP_H - startY);
+  const data = new Uint8Array(w * h);
+  for (let y = 0; y < h; y += 1) {
+    const srcStart = (startY + y) * MAP_W + startX;
+    data.set(layer.subarray(srcStart, srcStart + w), y * w);
+  }
+  return { w, h, data };
+}
+
+function fillRect(layerSetter, x0, y0, w, h, type) {
+  for (let y = y0; y < y0 + h; y += 1) {
+    for (let x = x0; x < x0 + w; x += 1) {
+      if (x < 0 || x >= MAP_W || y < 0 || y >= MAP_H) continue;
+      layerSetter(x, y, type);
+    }
+  }
+}
+
+function generateInitialMap(setTile) {
+  fillRect(setTile, 8, 8, 10, 6, TILE_TYPES.rock);
+  fillRect(setTile, 28, 16, 8, 10, TILE_TYPES.rock);
+  fillRect(setTile, 14, 30, 12, 5, TILE_TYPES.rock);
+  fillRect(setTile, 4, 4, 1, 1, TILE_TYPES.crystalGreen);
+  fillRect(setTile, 5, 4, 1, 1, TILE_TYPES.crystalBlue);
+  fillRect(setTile, 6, 4, 1, 1, TILE_TYPES.crystalWhite);
+  fillRect(setTile, 7, 4, 1, 1, TILE_TYPES.crystalRed);
+  fillRect(setTile, 8, 4, 1, 1, TILE_TYPES.crystalPink);
+  fillRect(setTile, 9, 4, 1, 1, TILE_TYPES.crystalCyan);
+  fillRect(setTile, 10, 4, 1, 1, TILE_TYPES.blackRock);
+  fillRect(setTile, 11, 4, 1, 1, TILE_TYPES.redRock);
+
+  const patches = [
+    { x: 18, y: 6, w: 6, h: 4, type: TILE_TYPES.crystalGreen },
+    { x: 26, y: 6, w: 5, h: 4, type: TILE_TYPES.crystalBlue },
+    { x: 33, y: 6, w: 5, h: 4, type: TILE_TYPES.crystalWhite },
+    { x: 40, y: 6, w: 4, h: 4, type: TILE_TYPES.crystalRed },
+    { x: 46, y: 6, w: 4, h: 4, type: TILE_TYPES.crystalPink },
+    { x: 52, y: 6, w: 4, h: 4, type: TILE_TYPES.crystalCyan },
+    { x: 16, y: 18, w: 8, h: 5, type: TILE_TYPES.crystalGreen },
+    { x: 28, y: 18, w: 6, h: 5, type: TILE_TYPES.crystalBlue },
+    { x: 36, y: 18, w: 6, h: 5, type: TILE_TYPES.crystalWhite },
+    { x: 44, y: 18, w: 5, h: 5, type: TILE_TYPES.crystalRed },
+    { x: 52, y: 18, w: 5, h: 5, type: TILE_TYPES.crystalPink },
+    { x: 60, y: 18, w: 5, h: 5, type: TILE_TYPES.crystalCyan },
+    { x: 22, y: 32, w: 7, h: 5, type: TILE_TYPES.crystalGreen },
+    { x: 32, y: 32, w: 6, h: 5, type: TILE_TYPES.crystalBlue },
+    { x: 40, y: 32, w: 6, h: 5, type: TILE_TYPES.crystalWhite },
+    { x: 48, y: 32, w: 5, h: 5, type: TILE_TYPES.crystalRed },
+    { x: 56, y: 32, w: 5, h: 5, type: TILE_TYPES.crystalPink },
+    { x: 64, y: 32, w: 5, h: 5, type: TILE_TYPES.crystalCyan }
+  ];
+
+  for (const patch of patches) {
+    fillRect(setTile, patch.x, patch.y, patch.w, patch.h, patch.type);
+  }
+}
+
+function createMapStore(dataDir) {
+  fs.mkdirSync(dataDir, { recursive: true });
+  const mapFile = path.join(dataDir, "map.bin");
+  const buildingsFile = path.join(dataDir, "buildings.bin");
+
+  let mapTiles = loadLayer(mapFile, MAP_W, MAP_H);
+  let buildingTiles = loadLayer(buildingsFile, MAP_W, MAP_H);
+  let mapDirty = false;
+  let buildingDirty = false;
+
+  if (!mapTiles) {
+    mapTiles = new Uint8Array(MAP_W * MAP_H);
+    generateInitialMap(setTile);
+    mapDirty = true;
+  }
+  if (!buildingTiles) {
+    buildingTiles = new Uint8Array(MAP_W * MAP_H);
+    buildingDirty = true;
+  }
+
+  const tileHp = new Map();
+  for (let y = 0; y < MAP_H; y += 1) {
+    for (let x = 0; x < MAP_W; x += 1) {
+      const type = getTile(x, y);
+      const hp = TILE_HP.get(type);
+      if (hp) {
+        tileHp.set(`${x},${y}`, hp);
+      }
+    }
+  }
+
+  function getTile(x, y) {
+    return mapTiles[layerIndex(x, y)];
+  }
+
+  function setTile(x, y, type) {
+    mapTiles[layerIndex(x, y)] = type;
+    mapDirty = true;
+  }
+
+  function getBuilding(x, y) {
+    return buildingTiles[layerIndex(x, y)];
+  }
+
+  function setBuilding(x, y, type) {
+    buildingTiles[layerIndex(x, y)] = type;
+    buildingDirty = true;
+  }
+
+  function getTileHp(x, y) {
+    return tileHp.get(`${x},${y}`);
+  }
+
+  function setTileHp(x, y, hp) {
+    tileHp.set(`${x},${y}`, hp);
+  }
+
+  function deleteTileHp(x, y) {
+    tileHp.delete(`${x},${y}`);
+  }
+
+  function encodeMapChunk(cx, cy, chunkSize) {
+    return encodeChunk(mapTiles, cx, cy, chunkSize);
+  }
+
+  function encodeBuildingChunk(cx, cy, chunkSize) {
+    return encodeChunk(buildingTiles, cx, cy, chunkSize);
+  }
+
+  function flushDirty() {
+    if (mapDirty) {
+      saveLayer(mapFile, mapTiles, MAP_W, MAP_H);
+      mapDirty = false;
+    }
+    if (buildingDirty) {
+      saveLayer(buildingsFile, buildingTiles, MAP_W, MAP_H);
+      buildingDirty = false;
+    }
+  }
+
+  return {
+    getTile,
+    setTile,
+    getBuilding,
+    setBuilding,
+    getTileHp,
+    setTileHp,
+    deleteTileHp,
+    encodeMapChunk,
+    encodeBuildingChunk,
+    flushDirty
+  };
+}
+
+module.exports = {
+  createMapStore,
+  encodeChunk
+};

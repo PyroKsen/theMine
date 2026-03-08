@@ -1,0 +1,235 @@
+const path = require("path");
+const Database = require("better-sqlite3");
+const { ITEM_DEFS, SKILL_DEFS } = require("./config");
+
+function buildSkillColumns() {
+  return SKILL_DEFS.flatMap((skill) => [
+    `skill_${skill.id}_level INTEGER NOT NULL DEFAULT 0`,
+    `skill_${skill.id}_xp INTEGER NOT NULL DEFAULT 0`
+  ]);
+}
+
+function createDb(dataDir) {
+  const db = new Database(path.join(dataDir, "themine.db"));
+  const skillColumns = buildSkillColumns();
+  db.exec(
+    `CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, password_hash TEXT NOT NULL, created_at INTEGER NOT NULL, last_tx INTEGER, last_ty INTEGER, explored_chunks TEXT, skill_slots TEXT, dollars INTEGER NOT NULL DEFAULT 0, coins INTEGER NOT NULL DEFAULT 0, hp INTEGER NOT NULL DEFAULT 100, max_hp INTEGER NOT NULL DEFAULT 100, crystal_green INTEGER NOT NULL DEFAULT 0, crystal_blue INTEGER NOT NULL DEFAULT 0, crystal_white INTEGER NOT NULL DEFAULT 0, crystal_red INTEGER NOT NULL DEFAULT 0, crystal_pink INTEGER NOT NULL DEFAULT 0, crystal_cyan INTEGER NOT NULL DEFAULT 0, item_medkit INTEGER NOT NULL DEFAULT 0, item_bomb INTEGER NOT NULL DEFAULT 0, item_plasmabomb INTEGER NOT NULL DEFAULT 0, item_electrobomb INTEGER NOT NULL DEFAULT 0, item_storage INTEGER NOT NULL DEFAULT 0, item_shop INTEGER NOT NULL DEFAULT 0, item_respawn INTEGER NOT NULL DEFAULT 0, item_upgrade INTEGER NOT NULL DEFAULT 0, item_turret INTEGER NOT NULL DEFAULT 0, item_clan_hall INTEGER NOT NULL DEFAULT 0, ${skillColumns.join(
+      ", "
+    )})`
+  );
+
+  const userColumns = new Set(
+    db.prepare("PRAGMA table_info(users)").all().map((row) => row.name)
+  );
+  if (!userColumns.has("last_tx")) {
+    db.exec("ALTER TABLE users ADD COLUMN last_tx INTEGER");
+  }
+  if (!userColumns.has("last_ty")) {
+    db.exec("ALTER TABLE users ADD COLUMN last_ty INTEGER");
+  }
+  if (!userColumns.has("explored_chunks")) {
+    db.exec("ALTER TABLE users ADD COLUMN explored_chunks TEXT");
+  }
+  if (!userColumns.has("skill_slots")) {
+    db.exec("ALTER TABLE users ADD COLUMN skill_slots TEXT");
+  }
+  if (!userColumns.has("dollars")) {
+    db.exec("ALTER TABLE users ADD COLUMN dollars INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!userColumns.has("coins")) {
+    db.exec("ALTER TABLE users ADD COLUMN coins INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!userColumns.has("hp")) {
+    db.exec("ALTER TABLE users ADD COLUMN hp INTEGER NOT NULL DEFAULT 100");
+  }
+  if (!userColumns.has("max_hp")) {
+    db.exec("ALTER TABLE users ADD COLUMN max_hp INTEGER NOT NULL DEFAULT 100");
+  }
+  if (!userColumns.has("crystal_green")) {
+    db.exec(
+      "ALTER TABLE users ADD COLUMN crystal_green INTEGER NOT NULL DEFAULT 0"
+    );
+  }
+  if (!userColumns.has("crystal_blue")) {
+    db.exec(
+      "ALTER TABLE users ADD COLUMN crystal_blue INTEGER NOT NULL DEFAULT 0"
+    );
+  }
+  if (!userColumns.has("crystal_white")) {
+    db.exec(
+      "ALTER TABLE users ADD COLUMN crystal_white INTEGER NOT NULL DEFAULT 0"
+    );
+  }
+  if (!userColumns.has("crystal_red")) {
+    db.exec(
+      "ALTER TABLE users ADD COLUMN crystal_red INTEGER NOT NULL DEFAULT 0"
+    );
+  }
+  if (!userColumns.has("crystal_pink")) {
+    db.exec(
+      "ALTER TABLE users ADD COLUMN crystal_pink INTEGER NOT NULL DEFAULT 0"
+    );
+  }
+  if (!userColumns.has("crystal_cyan")) {
+    db.exec(
+      "ALTER TABLE users ADD COLUMN crystal_cyan INTEGER NOT NULL DEFAULT 0"
+    );
+  }
+  for (const item of ITEM_DEFS) {
+    if (!userColumns.has(item.column)) {
+      db.exec(
+        `ALTER TABLE users ADD COLUMN ${item.column} INTEGER NOT NULL DEFAULT 0`
+      );
+    }
+  }
+  for (const skill of SKILL_DEFS) {
+    const levelColumn = `skill_${skill.id}_level`;
+    const xpColumn = `skill_${skill.id}_xp`;
+    if (!userColumns.has(levelColumn)) {
+      db.exec(
+        `ALTER TABLE users ADD COLUMN ${levelColumn} INTEGER NOT NULL DEFAULT 0`
+      );
+    }
+    if (!userColumns.has(xpColumn)) {
+      db.exec(
+        `ALTER TABLE users ADD COLUMN ${xpColumn} INTEGER NOT NULL DEFAULT 0`
+      );
+    }
+  }
+
+  const insertColumns = [
+    "username",
+    "password_hash",
+    "created_at",
+    "last_tx",
+    "last_ty",
+    "explored_chunks",
+    "skill_slots",
+    "dollars",
+    "coins",
+    "hp",
+    "max_hp",
+    "crystal_green",
+    "crystal_blue",
+    "crystal_white",
+    "crystal_red",
+    "crystal_pink",
+    "crystal_cyan",
+    ...SKILL_DEFS.flatMap((skill) => [
+      `skill_${skill.id}_level`,
+      `skill_${skill.id}_xp`
+    ])
+  ];
+  const insertValues = insertColumns.map(() => "?");
+  const stmtInsertUser = db.prepare(
+    `INSERT INTO users (${insertColumns.join(
+      ", "
+    )}) VALUES (${insertValues.join(", ")})`
+  );
+
+  const selectColumns = [
+    "username",
+    "password_hash",
+    "last_tx",
+    "last_ty",
+    "explored_chunks",
+    "skill_slots",
+    "dollars",
+    "coins",
+    "hp",
+    "max_hp",
+    "crystal_green",
+    "crystal_blue",
+    "crystal_white",
+    "crystal_red",
+    "crystal_pink",
+    "crystal_cyan",
+    ...ITEM_DEFS.map((item) => item.column),
+    ...SKILL_DEFS.flatMap((skill) => [
+      `skill_${skill.id}_level`,
+      `skill_${skill.id}_xp`
+    ])
+  ];
+  const stmtGetUser = db.prepare(
+    `SELECT ${selectColumns.join(", ")} FROM users WHERE username = ?`
+  );
+
+  const stmtUpdateUserPos = db.prepare(
+    "UPDATE users SET last_tx = ?, last_ty = ? WHERE username = ?"
+  );
+  const stmtUpdateExplored = db.prepare(
+    "UPDATE users SET explored_chunks = ? WHERE username = ?"
+  );
+  const stmtUpdateSkillSlots = db.prepare(
+    "UPDATE users SET skill_slots = ? WHERE username = ?"
+  );
+  const stmtUpdateDollars = db.prepare(
+    "UPDATE users SET dollars = ? WHERE username = ?"
+  );
+  const stmtUpdateHp = db.prepare("UPDATE users SET hp = ? WHERE username = ?");
+  const stmtUpdateMaxHp = db.prepare(
+    "UPDATE users SET max_hp = ? WHERE username = ?"
+  );
+  const itemUpdateStmts = new Map(
+    ITEM_DEFS.map((item) => [
+      item.id,
+      db.prepare(`UPDATE users SET ${item.column} = ? WHERE username = ?`)
+    ])
+  );
+  const stmtUpdateCrystalGreen = db.prepare(
+    "UPDATE users SET crystal_green = ? WHERE username = ?"
+  );
+  const stmtUpdateCrystalBlue = db.prepare(
+    "UPDATE users SET crystal_blue = ? WHERE username = ?"
+  );
+  const stmtUpdateCrystalWhite = db.prepare(
+    "UPDATE users SET crystal_white = ? WHERE username = ?"
+  );
+  const stmtUpdateCrystalRed = db.prepare(
+    "UPDATE users SET crystal_red = ? WHERE username = ?"
+  );
+  const stmtUpdateCrystalPink = db.prepare(
+    "UPDATE users SET crystal_pink = ? WHERE username = ?"
+  );
+  const stmtUpdateCrystalCyan = db.prepare(
+    "UPDATE users SET crystal_cyan = ? WHERE username = ?"
+  );
+
+  const skillUpdateStmts = new Map(
+    SKILL_DEFS.map((skill) => [
+      skill.id,
+      {
+        level: db.prepare(
+          `UPDATE users SET skill_${skill.id}_level = ? WHERE username = ?`
+        ),
+        xp: db.prepare(
+          `UPDATE users SET skill_${skill.id}_xp = ? WHERE username = ?`
+        )
+      }
+    ])
+  );
+
+  return {
+    db,
+    stmtInsertUser,
+    stmtGetUser,
+    stmtUpdateUserPos,
+    stmtUpdateExplored,
+    stmtUpdateSkillSlots,
+    stmtUpdateDollars,
+    stmtUpdateHp,
+    stmtUpdateMaxHp,
+    itemUpdateStmts,
+    stmtUpdateCrystalGreen,
+    stmtUpdateCrystalBlue,
+    stmtUpdateCrystalWhite,
+    stmtUpdateCrystalRed,
+    stmtUpdateCrystalPink,
+    stmtUpdateCrystalCyan,
+    skillUpdateStmts
+  };
+}
+
+module.exports = {
+  createDb
+};

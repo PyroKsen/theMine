@@ -34,6 +34,117 @@ const STORAGE_ITEMS = [
   { id: "pink", name: "Pink", className: "crystal-pink-text" },
   { id: "cyan", name: "Cyan", className: "crystal-cyan-text" }
 ];
+const BASE_INVENTORY_CAPACITY = 100;
+const BASE_MAX_DEPTH_TILES = 100;
+const DEPTH_PER_LEVEL = 100;
+
+const DEFAULT_SKILL_CONFIG = [
+  {
+    id: "hp",
+    name: "ХП",
+    short: "HP",
+    desc: "+1 к макс ХП за уровень",
+    xpBase: 8,
+    xpGrowth: 4,
+    dollarBase: 120,
+    dollarGrowth: 60,
+    locked: false
+  },
+  {
+    id: "mining",
+    name: "Копание",
+    short: "DIG",
+    desc: "+0.1 урона за удар",
+    xpBase: 6,
+    xpGrowth: 3,
+    dollarBase: 140,
+    dollarGrowth: 70,
+    locked: false
+  },
+  {
+    id: "move",
+    name: "Скорость",
+    short: "SPD",
+    desc: "+1% скорости передвижения",
+    xpBase: 6,
+    xpGrowth: 3,
+    dollarBase: 130,
+    dollarGrowth: 65,
+    locked: false
+  },
+  {
+    id: "inventory",
+    name: "Инвентарь",
+    short: "BAG",
+    desc: "+100 к вместимости каждого кристалла",
+    xpBase: 8,
+    xpGrowth: 4,
+    dollarBase: 160,
+    dollarGrowth: 80,
+    locked: false
+  },
+  {
+    id: "depth",
+    name: "Глубина",
+    short: "DEP",
+    desc: "+100 глубины за уровень",
+    xpBase: 8,
+    xpGrowth: 4,
+    dollarBase: 170,
+    dollarGrowth: 85,
+    locked: false
+  },
+  {
+    id: "build1",
+    name: "Стройка I",
+    short: "B1",
+    desc: "Строит зелёные блоки (5 ХП +1/ур., трата 3 зелёных -0.01/ур. до 1)",
+    xpBase: 8,
+    xpGrowth: 4,
+    dollarBase: 140,
+    dollarGrowth: 70,
+    locked: false,
+    slotOnly: true
+  },
+  {
+    id: "build2",
+    name: "Стройка II",
+    short: "B2",
+    desc: "Улучшает зелёный блок до жёлтого (+50 ХП +1/ур., трата 3 зелёных -0.01/ур. до 1 +1 белый)",
+    xpBase: 8,
+    xpGrowth: 4,
+    dollarBase: 160,
+    dollarGrowth: 80,
+    locked: false,
+    slotOnly: true,
+    requires: [{ id: "build1", level: 3 }]
+  },
+  {
+    id: "build3",
+    name: "Стройка III",
+    short: "B3",
+    desc: "Улучшает жёлтый блок до красного (+100 ХП +1/ур., трата 10 зелёных -0.01/ур. до 1 +1 синий +1 белый +1 красный)",
+    xpBase: 8,
+    xpGrowth: 4,
+    dollarBase: 180,
+    dollarGrowth: 90,
+    locked: false,
+    slotOnly: true,
+    requires: [{ id: "build2", level: 3 }]
+  },
+  {
+    id: "demolisher",
+    name: "Демонтажник",
+    short: "DMS",
+    desc: "+0.5 урона по строительным блокам за уровень",
+    xpBase: 8,
+    xpGrowth: 4,
+    dollarBase: 150,
+    dollarGrowth: 75,
+    locked: false,
+    slotOnly: true
+  }
+];
 
 const TILE_TYPES = {
   empty: 0,
@@ -45,7 +156,11 @@ const TILE_TYPES = {
   crystalPink: 6,
   crystalCyan: 7,
   blackRock: 8,
-  redRock: 9
+  redRock: 9,
+  buildGreen: 10,
+  buildYellow: 11,
+  buildRed: 12,
+  dropBox: 13
 };
 
 function crystalColor(type) {
@@ -129,6 +244,24 @@ export default function GameView({ token, onAuthExpired }) {
     pink: 0,
     cyan: 0
   });
+  const [dropOpen, setDropOpen] = useState(false);
+  const [dropError, setDropError] = useState("");
+  const [dropValues, setDropValues] = useState({
+    green: 0,
+    blue: 0,
+    white: 0,
+    red: 0,
+    pink: 0,
+    cyan: 0
+  });
+  const [skills, setSkills] = useState({});
+  const [skillConfig, setSkillConfig] = useState(DEFAULT_SKILL_CONFIG);
+  const [skillSlots, setSkillSlots] = useState(Array(20).fill(null));
+  const [selectedSlotIndex, setSelectedSlotIndex] = useState(null);
+  const [slotCandidateId, setSlotCandidateId] = useState(null);
+  const [selectedSkillId, setSelectedSkillId] = useState(
+    DEFAULT_SKILL_CONFIG[0]?.id || null
+  );
   const [itemInventory, setItemInventory] = useState([
     { id: "medkit", name: "Medkit", count: 0 },
     { id: "bomb", name: "Bomb", count: 0 },
@@ -202,9 +335,136 @@ export default function GameView({ token, onAuthExpired }) {
       return a.index - b.index;
     });
   const [mapHover, setMapHover] = useState({ x: null, y: null, inside: false });
+  const baseSkills = skillConfig.filter((skill) => !skill.slotOnly);
+  const slotSkills = skillConfig.filter((skill) => skill.slotOnly);
+  const visibleSkills = baseSkills.slice(0, 5);
+  const selectedSlotSkillId =
+    selectedSlotIndex !== null ? skillSlots[selectedSlotIndex] : null;
+  const selectedSlotSkill = selectedSlotSkillId
+    ? skillConfig.find((skill) => skill.id === selectedSlotSkillId)
+    : null;
+  const activeCoreSkill =
+    visibleSkills.find((skill) => skill.id === selectedSkillId) ||
+    visibleSkills[0] ||
+    null;
+  const activeSkill = selectedSlotSkill || activeCoreSkill;
+  const activeSkillState = activeSkill
+    ? skills[activeSkill.id] || { level: 0, xp: 0 }
+    : { level: 0, xp: 0 };
+  const activeSkillNeed = activeSkill
+    ? calcSkillNeed(activeSkill, activeSkillState.level)
+    : 0;
+  const activeSkillCost = activeSkill
+    ? calcSkillCost(activeSkill, activeSkillState.level)
+    : 0;
+  const inventoryCapacity =
+    BASE_INVENTORY_CAPACITY + (skills.inventory?.level ?? 0) * 100;
+  const dropTotal = Object.values(dropValues).reduce(
+    (sum, value) => sum + (Number(value) || 0),
+    0
+  );
+  const canUpgradeSkill =
+    activeSkill &&
+    !activeSkill.locked &&
+    activeSkillState.xp >= activeSkillNeed &&
+    wallet.dollars >= activeSkillCost &&
+    (!activeSkill.slotOnly || skillSlots.includes(activeSkill.id));
+  const slotCandidateSkill = slotCandidateId
+    ? slotSkills.find((skill) => skill.id === slotCandidateId)
+    : null;
+  const canInstallSlotSkill =
+    selectedSlotIndex !== null &&
+    !selectedSlotSkill &&
+    slotCandidateSkill &&
+    isSkillAvailable(slotCandidateSkill) &&
+    !skillSlots.includes(slotCandidateSkill.id);
 
   function clamp(value, min, max) {
     return Math.max(min, Math.min(max, value));
+  }
+
+  function normalizeSkillConfig(raw) {
+    if (!Array.isArray(raw) || raw.length === 0) {
+      return DEFAULT_SKILL_CONFIG;
+    }
+    return raw.map((entry) => ({
+      id: String(entry.id || ""),
+      name: String(entry.name || ""),
+      short: String(entry.short || "?"),
+      desc: String(entry.desc || ""),
+      xpBase: Number(entry.xpBase || 0),
+      xpGrowth: Number(entry.xpGrowth || 0),
+      dollarBase: Number(entry.dollarBase || 0),
+      dollarGrowth: Number(entry.dollarGrowth || 0),
+      locked: Boolean(entry.locked),
+      slotOnly: Boolean(entry.slotOnly),
+      requires: Array.isArray(entry.requires) ? entry.requires : []
+    }));
+  }
+
+  function normalizeSkillSlots(raw) {
+    const size = 20;
+    const slots = Array.isArray(raw)
+      ? raw.map((id) => (id ? String(id) : null))
+      : [];
+    while (slots.length < size) {
+      slots.push(null);
+    }
+    return slots.slice(0, size);
+  }
+
+  function isSkillAvailable(skill) {
+    if (!skill || skill.locked) return false;
+    if (!Array.isArray(skill.requires) || skill.requires.length === 0) {
+      return true;
+    }
+    return skill.requires.every((req) => {
+      const level = skills[req.id]?.level ?? 0;
+      return level >= Number(req.level || 0);
+    });
+  }
+
+  function calcSkillNeed(skill, level) {
+    if (!skill || skill.locked) return Infinity;
+    return Math.max(1, skill.xpBase + skill.xpGrowth * level);
+  }
+
+  function calcSkillCost(skill, level) {
+    if (!skill || skill.locked) return Infinity;
+    return Math.max(0, skill.dollarBase + skill.dollarGrowth * level);
+  }
+
+  function formatSkillTotal(skill, level) {
+    if (!skill || skill.locked) return "—";
+    const safeLevel = Math.max(0, Number(level) || 0);
+    if (skill.id === "hp") {
+      return `+${safeLevel} max HP`;
+    }
+    if (skill.id === "mining") {
+      return `+${(safeLevel * 0.1).toFixed(1)} dmg/удар`;
+    }
+    if (skill.id === "move") {
+      return `+${safeLevel}% скорость`;
+    }
+    if (skill.id === "inventory") {
+      return `+${safeLevel * 100} вместимости`;
+    }
+    if (skill.id === "depth") {
+      return `до ${BASE_MAX_DEPTH_TILES + safeLevel * DEPTH_PER_LEVEL} глубины`;
+    }
+    if (skill.id === "build1") {
+      return `HP блока: ${5 + safeLevel}`;
+    }
+    if (skill.id === "build2") {
+      return `+${50 + safeLevel} HP`;
+    }
+    if (skill.id === "build3") {
+      return `+${100 + safeLevel} HP`;
+    }
+    if (skill.id === "demolisher") {
+      return `+${(safeLevel * 0.5).toFixed(1)} урона`;
+    }
+    return "—";
   }
 
   function chunkKey(cx, cy) {
@@ -365,6 +625,23 @@ export default function GameView({ token, onAuthExpired }) {
             if (type === TILE_TYPES.crystalCyan) color = "#5ee9ff";
             if (type === TILE_TYPES.blackRock) color = "#0b0b0f";
             if (type === TILE_TYPES.redRock) color = "#7a0f0f";
+            if (type === TILE_TYPES.buildGreen) color = "#3bd97a";
+            if (type === TILE_TYPES.buildYellow) color = "#f9c74f";
+            if (type === TILE_TYPES.buildRed) color = "#ff6b6b";
+            if (type === TILE_TYPES.dropBox) {
+              const cx = originX + (startX + x + 0.5) * scale;
+              const cy = originY + (startY + y + 0.5) * scale;
+              const half = Math.max(0.5, scale / 2);
+              ctx.beginPath();
+              ctx.moveTo(cx, cy - half);
+              ctx.lineTo(cx + half, cy);
+              ctx.lineTo(cx, cy + half);
+              ctx.lineTo(cx - half, cy);
+              ctx.closePath();
+              ctx.fillStyle = "#d4b468";
+              ctx.fill();
+              continue;
+            }
             if (color) {
               ctx.fillStyle = color;
               ctx.fillRect(
@@ -623,6 +900,21 @@ export default function GameView({ token, onAuthExpired }) {
   }, [selectedItemId]);
 
   useEffect(() => {
+    if (!baseSkills.length) return;
+    const exists = baseSkills.some((skill) => skill.id === selectedSkillId);
+    if (!exists) {
+      setSelectedSkillId(baseSkills[0].id);
+    }
+  }, [baseSkills, selectedSkillId]);
+
+  useEffect(() => {
+    if (selectedSlotIndex == null) return;
+    if (selectedSlotIndex < 0 || selectedSlotIndex >= skillSlots.length) {
+      setSelectedSlotIndex(null);
+    }
+  }, [selectedSlotIndex, skillSlots.length]);
+
+  useEffect(() => {
     storageIdRef.current = storageId;
   }, [storageId]);
 
@@ -797,6 +1089,24 @@ export default function GameView({ token, onAuthExpired }) {
         for (let x = 0; x < chunk.w; x += 1) {
           const type = chunk.data[y * chunk.w + x];
           let color = null;
+          if (type === TILE_TYPES.dropBox) {
+            const cx = originX + x * tile + tile / 2;
+            const cy = originY + y * tile + tile / 2;
+            const half = tile / 2;
+            graphic.beginFill(0xd4b468);
+            graphic.drawPolygon([
+              cx,
+              cy - half,
+              cx + half,
+              cy,
+              cx,
+              cy + half,
+              cx - half,
+              cy
+            ]);
+            graphic.endFill();
+            continue;
+          }
           if (type === TILE_TYPES.rock) color = COLORS.rock;
           if (type === TILE_TYPES.crystalGreen) color = 0x38d86b;
           if (type === TILE_TYPES.crystalBlue) color = 0x4da3ff;
@@ -806,6 +1116,9 @@ export default function GameView({ token, onAuthExpired }) {
           if (type === TILE_TYPES.crystalCyan) color = 0x5ee9ff;
           if (type === TILE_TYPES.blackRock) color = 0x0b0b0f;
           if (type === TILE_TYPES.redRock) color = 0x7a0f0f;
+          if (type === TILE_TYPES.buildGreen) color = 0x3bd97a;
+          if (type === TILE_TYPES.buildYellow) color = 0xf9c74f;
+          if (type === TILE_TYPES.buildRed) color = 0xff6b6b;
           if (color !== null) {
             graphic.beginFill(color);
             graphic.drawRect(
@@ -1133,6 +1446,7 @@ export default function GameView({ token, onAuthExpired }) {
           const topLeftY = front.y - 2;
           const width = 3;
           const height = 3;
+          const topRightX = topLeftX + width - 1;
           let valid = facingUp;
           if (
             topLeftX < 0 ||
@@ -1172,6 +1486,7 @@ export default function GameView({ token, onAuthExpired }) {
             for (let x = topLeftX; x < topLeftX + width; x += 1) {
               if (x === front.x && y === front.y) continue;
               if (x === front.x && y === front.y - 1) continue;
+              if (y === topLeftY && (x === topLeftX || x === topRightX)) continue;
               placementLayer.drawRect(x * tile, y * tile, tile, tile);
             }
           }
@@ -1255,8 +1570,8 @@ export default function GameView({ token, onAuthExpired }) {
       if (key === "KeyS" || key === "ArrowDown") state.keys.down = pressed;
       if (key === "KeyA" || key === "ArrowLeft") state.keys.left = pressed;
       if (key === "KeyD" || key === "ArrowRight") state.keys.right = pressed;
-      if (key === "ControlLeft" || key === "ControlRight")
-        state.keys.ctrl = pressed;
+      if (key === "ShiftLeft" || key === "ShiftRight")
+        state.keys.shift = pressed;
       if (key === "KeyZ") state.keys.mine = pressed;
     }
 
@@ -1377,6 +1692,14 @@ export default function GameView({ token, onAuthExpired }) {
 
       const activeIds = new Set();
       let localPosition = null;
+      const selfId = state.playerId;
+      const selfA = selfId ? older.map.get(selfId) || newer.map.get(selfId) : null;
+      const selfB = selfId ? newer.map.get(selfId) || selfA : null;
+      const selfTx =
+        selfA && selfB ? lerp(selfA.tx, selfB.tx, t) : null;
+      const selfTy =
+        selfA && selfB ? lerp(selfA.ty, selfB.ty, t) : null;
+      const radiusSq = VIEW_RADIUS_TILES * VIEW_RADIUS_TILES;
 
       const { tile } = state.map;
       for (const id of ids) {
@@ -1386,6 +1709,13 @@ export default function GameView({ token, onAuthExpired }) {
         const x = (lerp(a.tx, b.tx, t) + 0.5) * tile;
         const y = (lerp(a.ty, b.ty, t) + 0.5) * tile;
         const sprite = getPlayerSprite(id);
+        if (selfTx != null && selfTy != null && id !== selfId) {
+          const dx = lerp(a.tx, b.tx, t) - selfTx;
+          const dy = lerp(a.ty, b.ty, t) - selfTy;
+          sprite.visible = dx * dx + dy * dy <= radiusSq;
+        } else {
+          sprite.visible = true;
+        }
         if (!sprite.renderPos.ready) {
           sprite.renderPos.x = x;
           sprite.renderPos.y = y;
@@ -1510,6 +1840,21 @@ export default function GameView({ token, onAuthExpired }) {
           useSelectedItem();
           return;
         }
+        if (event.code === "KeyR" && !event.repeat && !chatFocusRef.current) {
+          const socket = socketRef.current;
+          if (socket && socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({ t: "build_action" }));
+          }
+          return;
+        }
+        if (
+          (event.code === "ControlLeft" || event.code === "ControlRight") &&
+          !event.repeat &&
+          !chatFocusRef.current
+        ) {
+          state.keys.slow = !state.keys.slow;
+          return;
+        }
         updateInputKey(event.code, true);
       };
       const onKeyUp = (event) => updateInputKey(event.code, false);
@@ -1589,6 +1934,15 @@ export default function GameView({ token, onAuthExpired }) {
               cyan: Number(msg.inventory.cyan || 0)
             });
           }
+          if (msg.skillConfig) {
+            setSkillConfig(normalizeSkillConfig(msg.skillConfig));
+          }
+          if (msg.skills) {
+            setSkills(msg.skills);
+          }
+          if (Array.isArray(msg.skillSlots)) {
+            setSkillSlots(normalizeSkillSlots(msg.skillSlots));
+          }
           if (Array.isArray(msg.items)) {
             applyItems(msg.items);
           }
@@ -1646,7 +2000,8 @@ export default function GameView({ token, onAuthExpired }) {
         }
 
         if (msg.t === "tile") {
-          if (isTileWithinView(msg.x, msg.y)) {
+          const inView = isTileWithinView(msg.x, msg.y);
+          if (inView) {
             const updated = setChunkValue(
               mapDataRef.current.tiles,
               msg.x,
@@ -1657,6 +2012,11 @@ export default function GameView({ token, onAuthExpired }) {
               drawTerrainChunk(updated.cx, updated.cy);
               requestMapDraw();
             }
+          } else {
+            const chunkSize = mapDataRef.current.chunk || DEFAULT_MAP.chunk;
+            const cx = Math.floor(msg.x / chunkSize);
+            const cy = Math.floor(msg.y / chunkSize);
+            loadedChunksRef.current.delete(chunkKey(cx, cy));
           }
         }
 
@@ -1748,6 +2108,17 @@ export default function GameView({ token, onAuthExpired }) {
           });
         }
 
+        if (msg.t === "drop_ok") {
+          setDropOpen(false);
+          resetDropValues();
+          setDropError("");
+        }
+
+        if (msg.t === "drop_error") {
+          const text = msg.message ? String(msg.message) : "Drop failed";
+          setDropError(text);
+        }
+
         if (msg.t === "items" && Array.isArray(msg.items)) {
           applyItems(msg.items);
         }
@@ -1835,6 +2206,13 @@ export default function GameView({ token, onAuthExpired }) {
           applyItems(msg.items);
         }
 
+        if (msg.t === "skills" && msg.skills) {
+          setSkills(msg.skills);
+        }
+        if (msg.t === "skill_slots" && Array.isArray(msg.slots)) {
+          setSkillSlots(normalizeSkillSlots(msg.slots));
+        }
+
         if (msg.t === "storage_state" && msg.storage) {
           const id = String(msg.id || "");
           if (storageIdRef.current && id !== storageIdRef.current) return;
@@ -1855,7 +2233,8 @@ export default function GameView({ token, onAuthExpired }) {
           JSON.stringify({
             t: "input",
             dir: currentDir(),
-            ctrl: state.keys.ctrl,
+            ctrl: state.keys.slow,
+            shift: state.keys.shift,
             mine: state.keys.mine
           })
         );
@@ -1894,6 +2273,51 @@ export default function GameView({ token, onAuthExpired }) {
     if (!socket || socket.readyState !== WebSocket.OPEN) return;
     socket.send(JSON.stringify({ t: "chat", msg: text }));
     setChatInput("");
+  }
+
+  function requestSkillUpgrade(id) {
+    if (!id) return;
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) return;
+    socket.send(JSON.stringify({ t: "skill_upgrade", id }));
+  }
+
+  function requestSkillSlotSet(slot, id) {
+    if (slot == null || !id) return;
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) return;
+    socket.send(JSON.stringify({ t: "skill_slot_set", slot, id }));
+  }
+
+  function resetDropValues() {
+    setDropValues({
+      green: 0,
+      blue: 0,
+      white: 0,
+      red: 0,
+      pink: 0,
+      cyan: 0
+    });
+  }
+
+  function updateDropValue(id, value) {
+    const max = inventory[id] ?? 0;
+    let next = Math.floor(Number(value) || 0);
+    if (!Number.isFinite(next)) next = 0;
+    next = clamp(next, 0, max);
+    setDropValues((prev) => ({ ...prev, [id]: next }));
+  }
+
+  function submitDrop(all = false) {
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) return;
+    setDropError("");
+    if (all) {
+      socket.send(JSON.stringify({ t: "drop_crystals", all: true }));
+      return;
+    }
+    if (dropTotal <= 0) return;
+    socket.send(JSON.stringify({ t: "drop_crystals", crystals: dropValues }));
   }
 
   function useSelectedItem() {
@@ -2107,42 +2531,55 @@ export default function GameView({ token, onAuthExpired }) {
           </div>
         </div>
         <div className="game-overlay inventory-overlay">
-          <div className="inventory-title">Inventory</div>
+          <div className="inventory-header">
+            <div className="inventory-title">Inventory</div>
+            <button
+              className="inventory-drop-btn"
+              type="button"
+              onClick={() => {
+                resetDropValues();
+                setDropError("");
+                setDropOpen(true);
+              }}
+            >
+              Drop
+            </button>
+          </div>
           <div className="inventory-list">
             <div className="inventory-line">
               <span className="inventory-label">Green</span>
               <span className="inventory-value crystal-green-text">
-                {inventory.green}
+                {inventory.green}/{inventoryCapacity}
               </span>
             </div>
             <div className="inventory-line">
               <span className="inventory-label">Blue</span>
               <span className="inventory-value crystal-blue-text">
-                {inventory.blue}
+                {inventory.blue}/{inventoryCapacity}
               </span>
             </div>
             <div className="inventory-line">
               <span className="inventory-label">White</span>
               <span className="inventory-value crystal-white-text">
-                {inventory.white}
+                {inventory.white}/{inventoryCapacity}
               </span>
             </div>
             <div className="inventory-line">
               <span className="inventory-label">Red</span>
               <span className="inventory-value crystal-red-text">
-                {inventory.red}
+                {inventory.red}/{inventoryCapacity}
               </span>
             </div>
             <div className="inventory-line">
               <span className="inventory-label">Pink</span>
               <span className="inventory-value crystal-pink-text">
-                {inventory.pink}
+                {inventory.pink}/{inventoryCapacity}
               </span>
             </div>
             <div className="inventory-line">
               <span className="inventory-label">Cyan</span>
               <span className="inventory-value crystal-cyan-text">
-                {inventory.cyan}
+                {inventory.cyan}/{inventoryCapacity}
               </span>
             </div>
           </div>
@@ -2175,6 +2612,72 @@ export default function GameView({ token, onAuthExpired }) {
           ))}
         </div>
       </div>
+      {dropOpen ? (
+        <div className="storage-backdrop">
+          <div className="storage-modal">
+            <div className="storage-title">Drop crystals</div>
+            <div className="drop-list">
+              {STORAGE_ITEMS.map((item) => {
+                const have = inventory[item.id] ?? 0;
+                const amount = dropValues[item.id] ?? 0;
+                return (
+                  <div key={item.id} className="drop-row">
+                    <div className="drop-info">
+                      <span className={`drop-name ${item.className}`}>
+                        {item.name}
+                      </span>
+                      <span className="drop-have">You: {have}</span>
+                    </div>
+                    <input
+                      className="drop-input"
+                      type="number"
+                      inputMode="numeric"
+                      min="0"
+                      max={have}
+                      step="1"
+                      value={amount}
+                      onChange={(event) =>
+                        updateDropValue(item.id, event.target.value)
+                      }
+                    />
+                  </div>
+                );
+              })}
+            </div>
+            {dropError ? (
+              <div className="drop-error">{dropError}</div>
+            ) : null}
+            <div className="drop-actions">
+              <button
+                className="storage-btn"
+                type="button"
+                onClick={() => {
+                  setDropOpen(false);
+                  setDropError("");
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                className="storage-btn"
+                type="button"
+                disabled={dropTotal <= 0}
+                onClick={() => submitDrop(false)}
+              >
+                Drop selected
+              </button>
+              <button
+                className="shop-sell"
+                type="button"
+                disabled={Object.values(inventory).every((v) => (v ?? 0) <= 0)}
+                onClick={() => submitDrop(true)}
+              >
+                Drop all
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {storageOpen ? (
         <div className="storage-backdrop">
           <div className="storage-modal">
@@ -2423,7 +2926,165 @@ export default function GameView({ token, onAuthExpired }) {
             {upgradeTab === "manage" ? (
               <div className="upgrade-manage" />
             ) : (
-              <div className="upgrade-body" />
+              <div className="upgrade-body">
+                <div className="upgrade-ring">
+                  <div className="skill-ring">
+                    {Array.from({ length: 20 }).map((_, index) => {
+                      const angle = (index / 20) * Math.PI * 2 - Math.PI / 2;
+                      const radius = 98;
+                      const x = 110 + radius * Math.cos(angle);
+                      const y = 110 + radius * Math.sin(angle);
+                      const slotSkillId = skillSlots[index];
+                      const slotSkill = slotSkillId
+                        ? skillConfig.find((skill) => skill.id === slotSkillId)
+                        : null;
+                      const isSelected = selectedSlotIndex === index;
+                      return (
+                        <button
+                          key={`slot-${index}`}
+                          className={`skill-ring-slot${
+                            slotSkill ? " has-skill" : ""
+                          }${isSelected ? " is-selected" : ""}`}
+                          type="button"
+                          style={{ left: `${x}px`, top: `${y}px` }}
+                          onClick={() => {
+                            setSelectedSlotIndex((prev) =>
+                              prev === index ? null : index
+                            );
+                            if (!slotSkill) {
+                              setSlotCandidateId(null);
+                            }
+                          }}
+                        >
+                          {slotSkill ? (
+                            <span className="skill-ring-slot-label">
+                              {slotSkill.short || "?"}
+                            </span>
+                          ) : null}
+                        </button>
+                      );
+                    })}
+                    <div className="skill-core">
+                      {visibleSkills.map((skill, index) => {
+                        const angle = (index / 5) * Math.PI * 2 - Math.PI / 2;
+                        const radius = 52;
+                        const x = 70 + radius * Math.cos(angle);
+                        const y = 70 + radius * Math.sin(angle);
+                        const level = skills[skill.id]?.level ?? 0;
+                        const isSelected =
+                          selectedSlotIndex === null &&
+                          skill.id === activeCoreSkill?.id;
+                        return (
+                          <button
+                            key={skill.id}
+                            className={`skill-node${
+                              isSelected ? " is-selected" : ""
+                            }${skill.locked ? " is-locked" : ""}`}
+                            type="button"
+                            onClick={() => {
+                              setSelectedSkillId(skill.id);
+                              setSelectedSlotIndex(null);
+                            }}
+                            style={{ left: `${x}px`, top: `${y}px` }}
+                          >
+                            <div className="skill-node-label">
+                              {skill.short || "?"}
+                            </div>
+                            <div className="skill-node-level">Lv {level}</div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+                <div className="upgrade-panel">
+                  {selectedSlotIndex !== null && !selectedSlotSkill ? (
+                    <>
+                      <div className="upgrade-skill-title">Выбор слота</div>
+                      <div className="slot-skill-list">
+                        {slotSkills
+                          .filter((skill) => !skillSlots.includes(skill.id))
+                          .map((skill) => {
+                          const available = isSkillAvailable(skill);
+                          const isSelected = slotCandidateId === skill.id;
+                          return (
+                            <button
+                              key={skill.id}
+                              className={`slot-skill-item${
+                                available ? " is-available" : " is-locked"
+                              }${isSelected ? " is-selected" : ""}`}
+                              type="button"
+                              onClick={() => setSlotCandidateId(skill.id)}
+                            >
+                              <span className="slot-skill-name">
+                                {skill.name}
+                              </span>
+                              <span className="slot-skill-short">
+                                {skill.short}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <div className="slot-skill-desc">
+                        {slotCandidateSkill
+                          ? slotCandidateSkill.desc
+                          : "Выберите навык справа, чтобы увидеть описание."}
+                      </div>
+                      <button
+                        className="upgrade-btn"
+                        type="button"
+                        disabled={!canInstallSlotSkill}
+                        onClick={() => {
+                          if (!slotCandidateSkill) return;
+                          requestSkillSlotSet(
+                            selectedSlotIndex,
+                            slotCandidateSkill.id
+                          );
+                          setSlotCandidateId(null);
+                        }}
+                      >
+                        Установить
+                      </button>
+                    </>
+                  ) : activeSkill ? (
+                    <>
+                      <div className="upgrade-skill-title">
+                        {activeSkill.name}
+                      </div>
+                      <div className="upgrade-skill-desc">
+                        {activeSkill.desc}
+                      </div>
+                      <div className="upgrade-skill-stats">
+                        <div>Уровень: {activeSkillState.level}</div>
+                        <div>
+                          Итого: {formatSkillTotal(activeSkill, activeSkillState.level)}
+                        </div>
+                        <div>
+                          Опыт:{" "}
+                          {activeSkill.locked
+                            ? "—"
+                            : `${activeSkillState.xp} / ${activeSkillNeed}`}
+                        </div>
+                        <div>
+                          Стоимость:{" "}
+                          {activeSkill.locked
+                            ? "—"
+                            : `$${activeSkillCost}`}
+                        </div>
+                      </div>
+                      <button
+                        className="upgrade-btn"
+                        type="button"
+                        disabled={!canUpgradeSkill}
+                        onClick={() => requestSkillUpgrade(activeSkill.id)}
+                      >
+                        {activeSkill.locked ? "Скоро" : "Улучшить"}
+                      </button>
+                    </>
+                  ) : null}
+                </div>
+              </div>
             )}
           </div>
         </div>

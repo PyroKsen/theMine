@@ -174,7 +174,8 @@ export default function App() {
             <div className="modal-title">Tips</div>
             <div className="modal-body">
               <div>Move: WASD or Arrow keys</div>
-              <div>Rotate in place: Ctrl + WASD</div>
+              <div>Rotate in place: Shift + WASD</div>
+              <div>Slow move (cap 5 tiles/s): Ctrl (toggle)</div>
               <div>Mine: Z</div>
               <div>Use selected item: F</div>
               <div>World map: M (close with M or Esc)</div>
