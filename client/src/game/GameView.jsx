@@ -208,6 +208,7 @@ export default function GameView({ token, onAuthExpired }) {
   const chatFocusRef = useRef(false);
   const placementRef = useRef({ x: null, y: null, valid: false });
   const loadedChunksRef = useRef(new Set());
+  const staleChunksRef = useRef(new Set());
   const exploredChunksRef = useRef(new Set());
   const hydrateCacheRef = useRef(null);
   const usernameRef = useRef("");
@@ -1182,6 +1183,7 @@ export default function GameView({ token, onAuthExpired }) {
       const chunkSize = state.map.chunk || DEFAULT_MAP.chunk;
       const { w, h } = mapDataRef.current;
       for (const key of exploredChunksRef.current) {
+        if (staleChunksRef.current.has(key)) continue;
         if (loadedChunksRef.current.has(key)) continue;
         const parts = key.split(",");
         const cx = Number(parts[0]);
@@ -1622,20 +1624,24 @@ export default function GameView({ token, onAuthExpired }) {
         const maxCy = Math.floor(maxY / chunkSize);
         const now = performance.now();
         const request = [];
-        for (let cy = minCy; cy <= maxCy; cy += 1) {
-          for (let cx = minCx; cx <= maxCx; cx += 1) {
-            if (!chunkIntersectsView(cx, cy)) continue;
-            const key = chunkKey(cx, cy);
-            if (loadedChunksRef.current.has(key)) continue;
-            const last = chunkRequestTimeRef.current.get(key) || 0;
-            if (now - last < 800) continue;
-            chunkRequestTimeRef.current.set(key, now);
-            request.push({ cx, cy });
+          for (let cy = minCy; cy <= maxCy; cy += 1) {
+            for (let cx = minCx; cx <= maxCx; cx += 1) {
+              if (!chunkIntersectsView(cx, cy)) continue;
+              const key = chunkKey(cx, cy);
+              const isStale = staleChunksRef.current.has(key);
+              if (loadedChunksRef.current.has(key) && !isStale) continue;
+              const last = chunkRequestTimeRef.current.get(key) || 0;
+              if (now - last < 800) continue;
+              chunkRequestTimeRef.current.set(key, now);
+              request.push({ cx, cy });
+            }
           }
-        }
-        if (request.length > 0) {
-          requestChunks(request);
-        }
+          if (request.length > 0) {
+            const force = request.some(({ cx, cy }) =>
+              staleChunksRef.current.has(chunkKey(cx, cy))
+            );
+            requestChunks(request, { force });
+          }
         updateBuildingWindows();
       }
     }
@@ -1991,6 +1997,7 @@ export default function GameView({ token, onAuthExpired }) {
             storeChunk(mapDataRef.current.tiles, cx, cy, w, h, tiles);
             storeChunk(mapDataRef.current.buildings, cx, cy, w, h, buildings);
             loadedChunksRef.current.add(chunkKey(cx, cy));
+            staleChunksRef.current.delete(chunkKey(cx, cy));
             exploredChunksRef.current.add(chunkKey(cx, cy));
             saveChunkCache(cx, cy, msg.tiles, msg.buildings);
             drawTerrainChunk(cx, cy);
@@ -2016,7 +2023,9 @@ export default function GameView({ token, onAuthExpired }) {
             const chunkSize = mapDataRef.current.chunk || DEFAULT_MAP.chunk;
             const cx = Math.floor(msg.x / chunkSize);
             const cy = Math.floor(msg.y / chunkSize);
-            loadedChunksRef.current.delete(chunkKey(cx, cy));
+            const key = chunkKey(cx, cy);
+            loadedChunksRef.current.delete(key);
+            staleChunksRef.current.add(key);
           }
         }
 
