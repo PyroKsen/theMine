@@ -81,6 +81,9 @@ function generateInitialMap(setTile) {
   fillRect(setTile, 9, 4, 1, 1, TILE_TYPES.crystalCyan);
   fillRect(setTile, 10, 4, 1, 1, TILE_TYPES.blackRock);
   fillRect(setTile, 11, 4, 1, 1, TILE_TYPES.redRock);
+  fillRect(setTile, 12, 4, 1, 1, TILE_TYPES.semiMagneticRock);
+  fillRect(setTile, 13, 4, 1, 1, TILE_TYPES.magneticRock);
+  fillRect(setTile, 14, 4, 1, 1, TILE_TYPES.acidRock);
 
   const patches = [
     { x: 18, y: 6, w: 6, h: 4, type: TILE_TYPES.crystalGreen },
@@ -206,3 +209,7 @@ module.exports = {
   createMapStore,
   encodeChunk
 };
+
+
+
+

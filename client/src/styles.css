@@ -353,6 +353,25 @@ html, body, #root {
   font-weight: 700;
 }
 
+.depth-warning {
+  color: #ff6b6b;
+  animation: depth-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes depth-pulse {
+  0%,
+  100% {
+    color: #ff6b6b;
+    text-shadow: 0 0 0 rgba(255, 64, 64, 0);
+    opacity: 0.7;
+  }
+  50% {
+    color: #ffb0b0;
+    text-shadow: 0 0 10px rgba(255, 64, 64, 0.45);
+    opacity: 1;
+  }
+}
+
 .crystal-green-text {
   color: #38d86b;
 }
@@ -1140,3 +1159,165 @@ html, body, #root {
 .map-coord-hover {
   color: #8fe3ff;
 }
+
+.teleport-modal {
+  width: min(640px, 92vw);
+}
+
+.teleport-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.teleport-meta {
+  gap: 4px;
+}
+
+.teleport-map-shell {
+  display: flex;
+  justify-content: center;
+}
+
+.teleport-map {
+  position: relative;
+  width: min(420px, 100%);
+  aspect-ratio: 1;
+  border: 1px solid #3f454d;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #4f555e, #343941);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+  overflow: hidden;
+}
+
+.teleport-map::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+  background-size: 36px 36px;
+}
+
+.teleport-map-lines {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+}
+
+.teleport-map-lines line {
+  stroke: #e0e2e6;
+  stroke-width: 2.5;
+  opacity: 0.8;
+}
+
+.teleport-node {
+  position: absolute;
+  z-index: 2;
+  transform: translate(-50%, -50%);
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #eef2f6;
+}
+
+.teleport-node:disabled {
+  cursor: default;
+}
+
+.teleport-node:not(:disabled) {
+  cursor: pointer;
+}
+
+.teleport-node-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid #f1f3f6;
+  background: #eceef1;
+  box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.1);
+}
+
+.teleport-node-label {
+  max-width: 88px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(17, 21, 27, 0.58);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.teleport-node.is-current .teleport-node-dot {
+  background: #86e7ff;
+  border-color: #d6fbff;
+  box-shadow: 0 0 0 5px rgba(95, 226, 255, 0.22);
+}
+
+.teleport-node.is-linked .teleport-node-dot {
+  background: #f4f5f7;
+}
+
+.teleport-node.is-linked:hover .teleport-node-dot {
+  transform: scale(1.14);
+  box-shadow: 0 0 0 6px rgba(255, 255, 255, 0.18);
+}
+
+.teleport-node.is-distant .teleport-node-dot {
+  background: #838a92;
+  border-color: #b7bcc2;
+  box-shadow: 0 0 0 4px rgba(70, 76, 84, 0.14);
+}
+
+.teleport-node.is-distant .teleport-node-label {
+  color: #d4dae0;
+  background: rgba(33, 37, 43, 0.5);
+}
+
+.teleport-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 11px;
+  color: #cfd5dc;
+}
+
+.teleport-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.teleport-legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1px solid #d9dde1;
+  background: #f0f2f5;
+}
+
+.teleport-legend-dot.is-current {
+  background: #86e7ff;
+  border-color: #d6fbff;
+}
+
+.teleport-legend-dot.is-linked {
+  background: #f4f5f7;
+}
+
+.teleport-legend-dot.is-distant {
+  background: #838a92;
+  border-color: #b7bcc2;
+}
+

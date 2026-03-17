@@ -2,6 +2,18 @@ import React, { useMemo, useState } from "react";
 import GameView from "./game/GameView.jsx";
 
 const AUTH_STORAGE_KEY = "theMine.auth";
+const AUTH_ERROR_MESSAGES = {
+  bad_username: "Username must be 3 to 20 characters long.",
+  bad_password: "Password must be 4 to 64 characters long.",
+  user_exists: "That username is already taken.",
+  invalid_credentials: "Incorrect username or password.",
+  db_error: "Server error. Please try again.",
+  auth_failed: "Authentication failed. Please try again."
+};
+
+function formatAuthError(code) {
+  return AUTH_ERROR_MESSAGES[code] || "Authentication failed. Please try again.";
+}
 
 export default function App() {
   const [auth, setAuth] = useState(() => {
@@ -54,7 +66,7 @@ export default function App() {
       setAuth(nextAuth);
       setForm({ username: "", password: "" });
     } catch (err) {
-      setError(err?.message || "auth_failed");
+      setError(formatAuthError(err?.message || "auth_failed"));
     } finally {
       setStatus("idle");
     }

@@ -165,7 +165,7 @@ function createPlayerService({
   function grantAdminItems(player) {
     if (player.username !== "Admin") return;
     for (const item of ITEM_DEFS) {
-      setItemCount(player, item.id, 5);
+      setItemCount(player, item.id, 1000);
     }
   }
 

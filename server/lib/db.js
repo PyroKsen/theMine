@@ -13,7 +13,7 @@ function createDb(dataDir) {
   const db = new Database(path.join(dataDir, "themine.db"));
   const skillColumns = buildSkillColumns();
   db.exec(
-    `CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, password_hash TEXT NOT NULL, created_at INTEGER NOT NULL, last_tx INTEGER, last_ty INTEGER, explored_chunks TEXT, skill_slots TEXT, dollars INTEGER NOT NULL DEFAULT 0, coins INTEGER NOT NULL DEFAULT 0, hp INTEGER NOT NULL DEFAULT 100, max_hp INTEGER NOT NULL DEFAULT 100, crystal_green INTEGER NOT NULL DEFAULT 0, crystal_blue INTEGER NOT NULL DEFAULT 0, crystal_white INTEGER NOT NULL DEFAULT 0, crystal_red INTEGER NOT NULL DEFAULT 0, crystal_pink INTEGER NOT NULL DEFAULT 0, crystal_cyan INTEGER NOT NULL DEFAULT 0, item_medkit INTEGER NOT NULL DEFAULT 0, item_bomb INTEGER NOT NULL DEFAULT 0, item_plasmabomb INTEGER NOT NULL DEFAULT 0, item_electrobomb INTEGER NOT NULL DEFAULT 0, item_storage INTEGER NOT NULL DEFAULT 0, item_shop INTEGER NOT NULL DEFAULT 0, item_respawn INTEGER NOT NULL DEFAULT 0, item_upgrade INTEGER NOT NULL DEFAULT 0, item_turret INTEGER NOT NULL DEFAULT 0, item_clan_hall INTEGER NOT NULL DEFAULT 0, ${skillColumns.join(
+    `CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, password_hash TEXT NOT NULL, created_at INTEGER NOT NULL, last_tx INTEGER, last_ty INTEGER, explored_chunks TEXT, skill_slots TEXT, respawn_building_id TEXT, dollars INTEGER NOT NULL DEFAULT 0, coins INTEGER NOT NULL DEFAULT 0, hp INTEGER NOT NULL DEFAULT 100, max_hp INTEGER NOT NULL DEFAULT 100, crystal_green INTEGER NOT NULL DEFAULT 0, crystal_blue INTEGER NOT NULL DEFAULT 0, crystal_white INTEGER NOT NULL DEFAULT 0, crystal_red INTEGER NOT NULL DEFAULT 0, crystal_pink INTEGER NOT NULL DEFAULT 0, crystal_cyan INTEGER NOT NULL DEFAULT 0, item_medkit INTEGER NOT NULL DEFAULT 0, item_bomb INTEGER NOT NULL DEFAULT 0, item_plasmabomb INTEGER NOT NULL DEFAULT 0, item_electrobomb INTEGER NOT NULL DEFAULT 0, item_storage INTEGER NOT NULL DEFAULT 0, item_shop INTEGER NOT NULL DEFAULT 0, item_respawn INTEGER NOT NULL DEFAULT 0, item_upgrade INTEGER NOT NULL DEFAULT 0, item_turret INTEGER NOT NULL DEFAULT 0, item_clan_hall INTEGER NOT NULL DEFAULT 0, ${skillColumns.join(
       ", "
     )})`
   );
@@ -32,6 +32,9 @@ function createDb(dataDir) {
   }
   if (!userColumns.has("skill_slots")) {
     db.exec("ALTER TABLE users ADD COLUMN skill_slots TEXT");
+  }
+  if (!userColumns.has("respawn_building_id")) {
+    db.exec("ALTER TABLE users ADD COLUMN respawn_building_id TEXT");
   }
   if (!userColumns.has("dollars")) {
     db.exec("ALTER TABLE users ADD COLUMN dollars INTEGER NOT NULL DEFAULT 0");
@@ -105,6 +108,7 @@ function createDb(dataDir) {
     "last_ty",
     "explored_chunks",
     "skill_slots",
+    "respawn_building_id",
     "dollars",
     "coins",
     "hp",
@@ -134,6 +138,7 @@ function createDb(dataDir) {
     "last_ty",
     "explored_chunks",
     "skill_slots",
+    "respawn_building_id",
     "dollars",
     "coins",
     "hp",
@@ -162,6 +167,9 @@ function createDb(dataDir) {
   );
   const stmtUpdateSkillSlots = db.prepare(
     "UPDATE users SET skill_slots = ? WHERE username = ?"
+  );
+  const stmtUpdateRespawnBuildingId = db.prepare(
+    "UPDATE users SET respawn_building_id = ? WHERE username = ?"
   );
   const stmtUpdateDollars = db.prepare(
     "UPDATE users SET dollars = ? WHERE username = ?"
@@ -216,6 +224,7 @@ function createDb(dataDir) {
     stmtUpdateUserPos,
     stmtUpdateExplored,
     stmtUpdateSkillSlots,
+    stmtUpdateRespawnBuildingId,
     stmtUpdateDollars,
     stmtUpdateHp,
     stmtUpdateMaxHp,
