@@ -161,7 +161,45 @@ export const TILE_TYPES = {
   dropBox: 13,
   semiMagneticRock: 14,
   magneticRock: 15,
-  acidRock: 16
+  acidRock: 16,
+  reinforcedRock: 17,
+  ironRock: 18,
+  steelRock: 19,
+  slimeRock: 20,
+  corrosiveRock: 21,
+  radioactiveRock: 22,
+  sand: 23,
+  steelSand: 24,
+  magma: 25
+};
+
+export const TILE_DISPLAY = {
+  [TILE_TYPES.empty]: { name: "Empty", color: "#0b1016" },
+  [TILE_TYPES.rock]: { name: "Rock", color: "#2b0f4d" },
+  [TILE_TYPES.crystalGreen]: { name: "Green Crystal", color: "#38d86b" },
+  [TILE_TYPES.crystalBlue]: { name: "Blue Crystal", color: "#4da3ff" },
+  [TILE_TYPES.crystalWhite]: { name: "White Crystal", color: "#f0f4ff" },
+  [TILE_TYPES.crystalRed]: { name: "Red Crystal", color: "#ff5d5d" },
+  [TILE_TYPES.crystalPink]: { name: "Pink Crystal", color: "#ff7fd6" },
+  [TILE_TYPES.crystalCyan]: { name: "Cyan Crystal", color: "#5ee9ff" },
+  [TILE_TYPES.blackRock]: { name: "Black Rock", color: "#0b0b0f" },
+  [TILE_TYPES.redRock]: { name: "Red Rock", color: "#7a0f0f" },
+  [TILE_TYPES.buildGreen]: { name: "Green Build Block", color: "#3bd97a" },
+  [TILE_TYPES.buildYellow]: { name: "Yellow Build Block", color: "#f9c74f" },
+  [TILE_TYPES.buildRed]: { name: "Red Build Block", color: "#ff6b6b" },
+  [TILE_TYPES.dropBox]: { name: "Drop Box", color: "#d4b468" },
+  [TILE_TYPES.semiMagneticRock]: { name: "Semi-Magnetic Rock", color: "#5f4b2b" },
+  [TILE_TYPES.magneticRock]: { name: "Magnetic Rock", color: "#7f6816" },
+  [TILE_TYPES.acidRock]: { name: "Acid Rock", color: "#1d4f2f" },
+  [TILE_TYPES.reinforcedRock]: { name: "Reinforced Rock", color: "#3a272c" },
+  [TILE_TYPES.ironRock]: { name: "Iron Rock", color: "#2d3135" },
+  [TILE_TYPES.steelRock]: { name: "Steel Rock", color: "#1e2125" },
+  [TILE_TYPES.slimeRock]: { name: "Slime Rock", color: "#2f6f44" },
+  [TILE_TYPES.corrosiveRock]: { name: "Corrosive Rock", color: "#74d44f" },
+  [TILE_TYPES.radioactiveRock]: { name: "Radioactive Rock", color: "#9dff2f" },
+  [TILE_TYPES.sand]: { name: "Sand", color: "#d4b24a" },
+  [TILE_TYPES.steelSand]: { name: "Steel Sand", color: "#7fc9ff" },
+  [TILE_TYPES.magma]: { name: "Magma", color: "#6a1b08" }
 };
 
 export const FACING_ROTATIONS = new Map([
@@ -170,6 +208,15 @@ export const FACING_ROTATIONS = new Map([
   ["0,1", Math.PI],
   ["-1,0", -Math.PI / 2]
 ]);
+
+
+
+
+
+
+
+
+
 
 
 

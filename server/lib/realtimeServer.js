@@ -51,7 +51,12 @@ function attachRealtimeServer({
     encodeMapChunk,
     encodeBuildingChunk,
     flushDirty,
-    getTile
+    getTile,
+    setTile,
+    getBuilding,
+    getTileHp,
+    setTileHp,
+    deleteTileHp
   } = mapStore;
   const {
     buildings,
@@ -76,7 +81,7 @@ function attachRealtimeServer({
     markDirty: markBuildingsDirty,
     flush: flushBuildings
   } = buildingManager;
-  const { placeBomb } = bombManager;
+  const { bombByTile, placeBomb } = bombManager;
   const {
     sendToPlayer,
     sendSkills,
@@ -150,6 +155,84 @@ function attachRealtimeServer({
         buildings: Buffer.from(buildingChunk.data).toString("base64")
       })
     );
+  }
+
+  const FALLING_TILE_STEP_MS = 500;
+  const SAND_FALL_DAMAGE = 3;
+  const STEEL_SAND_FALL_DAMAGE = 10;
+  const MAGMA_FALL_DAMAGE = 60;
+
+  function isFallingTile(type) {
+    return (
+      type === TILE_TYPES.sand ||
+      type === TILE_TYPES.steelSand ||
+      type === TILE_TYPES.magma
+    );
+  }
+  function findPlayerAt(tx, ty) {
+    for (const player of players.values()) {
+      if (player.tx === tx && player.ty === ty && player.hp > 0) {
+        return player;
+      }
+    }
+    return null;
+  }
+
+  function canFallingTileOccupy(tx, ty) {
+    if (tx < 0 || tx >= MAP_W || ty < 0 || ty >= MAP_H) return false;
+    if (getTile(tx, ty) !== TILE_TYPES.empty) return false;
+    if (getBuilding(tx, ty) !== 0) return false;
+    if (bombByTile.has(`${tx},${ty}`)) return false;
+    return true;
+  }
+
+  function moveFallingTile(fromX, fromY, toX, toY) {
+    const type = getTile(fromX, fromY);
+    if (!isFallingTile(type)) return false;
+    if (toX < 0 || toX >= MAP_W || toY < 0 || toY >= MAP_H) return false;
+    const targetPlayer = findPlayerAt(toX, toY);
+    if (targetPlayer) {
+      setTile(fromX, fromY, TILE_TYPES.empty);
+      deleteTileHp(fromX, fromY);
+      broadcast({ t: "tile", x: fromX, y: fromY, value: TILE_TYPES.empty });
+      const fallDamage =
+        type === TILE_TYPES.magma
+          ? MAGMA_FALL_DAMAGE
+          : type === TILE_TYPES.steelSand
+          ? STEEL_SAND_FALL_DAMAGE
+          : SAND_FALL_DAMAGE;
+      applyDamageToPlayer(targetPlayer, fallDamage);
+      return true;
+    }
+    if (!canFallingTileOccupy(toX, toY)) return false;
+    const currentHp = getTileHp(fromX, fromY) ?? TILE_HP.get(type) ?? 1;
+    setTile(fromX, fromY, TILE_TYPES.empty);
+    deleteTileHp(fromX, fromY);
+    setTile(toX, toY, type);
+    setTileHp(toX, toY, currentHp);
+    broadcast({ t: "tile", x: fromX, y: fromY, value: TILE_TYPES.empty });
+    broadcast({ t: "tile", x: toX, y: toY, value: type });
+    return true;
+  }
+
+  function runFallingTilesStep() {
+    for (let y = MAP_H - 2; y >= 0; y -= 1) {
+      for (let x = 0; x < MAP_W; x += 1) {
+        const type = getTile(x, y);
+        if (!isFallingTile(type)) continue;
+        if (moveFallingTile(x, y, x, y + 1)) {
+          continue;
+        }
+        const belowType = getTile(x, y + 1);
+        if (!isFallingTile(belowType)) continue;
+        const directions = Math.random() < 0.5 ? [-1, 1] : [1, -1];
+        for (const dx of directions) {
+          if (moveFallingTile(x, y, x + dx, y + 1)) {
+            break;
+          }
+        }
+      }
+    }
   }
 
   wss.on("connection", (ws, req) => {
@@ -695,6 +778,8 @@ function attachRealtimeServer({
     });
   });
 
+  setInterval(runFallingTilesStep, FALLING_TILE_STEP_MS);
+
   const tickIntervalMs = 1000 / TICK_RATE;
   setInterval(() => {
     const dtMs = 1000 / TICK_RATE;
@@ -755,8 +840,22 @@ function attachRealtimeServer({
               type === TILE_TYPES.buildYellow ||
               type === TILE_TYPES.buildRed;
             const isDropBox = type === TILE_TYPES.dropBox;
-            const isAcidRock = type === TILE_TYPES.acidRock;
             let damage = getMiningDamage(player);
+            let hazardDamageMin = 0;
+            let hazardDamageMax = 0;
+            if (type === TILE_TYPES.acidRock) {
+              hazardDamageMin = 2;
+              hazardDamageMax = 5;
+            } else if (type === TILE_TYPES.slimeRock) {
+              hazardDamageMin = 5;
+              hazardDamageMax = 10;
+            } else if (type === TILE_TYPES.corrosiveRock) {
+              hazardDamageMin = 15;
+              hazardDamageMax = 30;
+            } else if (type === TILE_TYPES.radioactiveRock) {
+              hazardDamageMin = 50;
+              hazardDamageMax = 75;
+            }
             if (isBuildTile) {
               const demoLevel = player.skills?.demolisher?.level ?? 0;
               damage += demoLevel * 0.5;
@@ -769,9 +868,11 @@ function attachRealtimeServer({
               damage
             );
             if (result.hit) {
-              if (isAcidRock) {
-                const acidDamage = 2 + Math.floor(Math.random() * 4);
-                applyDamageToPlayer(player, acidDamage);
+              if (hazardDamageMax > 0) {
+                const hazardDamage =
+                  hazardDamageMin +
+                  Math.floor(Math.random() * (hazardDamageMax - hazardDamageMin + 1));
+                applyDamageToPlayer(player, hazardDamage);
               }
               if (result.broken) {
                 if (isDropBox) {
@@ -902,6 +1003,13 @@ function attachRealtimeServer({
 module.exports = {
   attachRealtimeServer
 };
+
+
+
+
+
+
+
 
 
 

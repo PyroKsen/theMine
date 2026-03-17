@@ -3,7 +3,8 @@ import {
   BASE_MAX_DEPTH_TILES,
   DEFAULT_MAP,
   DEFAULT_SKILL_CONFIG,
-  DEPTH_PER_LEVEL
+  DEPTH_PER_LEVEL,
+  TILE_DISPLAY
 } from "./constants.js";
 import { chunkKey, formatSkillTotal } from "./helpers.js";
 import { ChatPanel } from "./overlays/ChatPanel.jsx";
@@ -261,6 +262,38 @@ export default function GameView({ token, onAuthExpired }) {
     : { x: 1, y: 1 };
   const maxDepth =
     BASE_MAX_DEPTH_TILES + (Number(skills.depth?.level || 0) * DEPTH_PER_LEVEL);
+
+  function getLoadedTileType(tx, ty) {
+    const { w, h, chunk, tiles } = mapDataRef.current;
+    if (tx < 0 || ty < 0 || tx >= w || ty >= h) return null;
+    const chunkSize = chunk || DEFAULT_MAP.chunk;
+    const cx = Math.floor(tx / chunkSize);
+    const cy = Math.floor(ty / chunkSize);
+    const loadedChunk = tiles.get(chunkKey(cx, cy));
+    if (!loadedChunk) return null;
+    const lx = tx - cx * chunkSize;
+    const ly = ty - cy * chunkSize;
+    if (lx < 0 || ly < 0 || lx >= loadedChunk.w || ly >= loadedChunk.h) {
+      return null;
+    }
+    return loadedChunk.data[ly * loadedChunk.w + lx];
+  }
+
+  const frontTileInfo = (() => {
+    const player = localPlayerRef.current;
+    if (!player.ready) {
+      return { name: "Unknown", color: "#253140", coords: null };
+    }
+    const tx = player.tx + player.fx;
+    const ty = player.ty + player.fy;
+    const type = getLoadedTileType(tx, ty);
+    if (type == null) {
+      return { name: "Unknown", color: "#253140", coords: { x: tx, y: ty } };
+    }
+    const display = TILE_DISPLAY[type] || { name: `Tile ${type}`, color: "#253140" };
+    return { ...display, coords: { x: tx, y: ty } };
+  })();
+
   const isOverDepth = coords.y > maxDepth;
 
   function confirmResetRespawn() {
@@ -712,20 +745,39 @@ export default function GameView({ token, onAuthExpired }) {
             >
               My Buildings
             </button>
-              <button
-                className="inventory-drop-btn"
-                type="button"
-                onClick={confirmResetRespawn}
-              >
-                Reset Respawn
-              </button>
-              <button
-                className="inventory-drop-btn"
-                type="button"
-                onClick={confirmForceDeath}
-              >
-                Force Death
-              </button>
+            <button
+              className="inventory-drop-btn"
+              type="button"
+              onClick={confirmResetRespawn}
+            >
+              Reset Respawn
+            </button>
+            <button
+              className="inventory-drop-btn"
+              type="button"
+              onClick={confirmForceDeath}
+            >
+              Force Death
+            </button>
+          </div>
+        </div>
+        <div className="game-overlay target-block-overlay">
+          <div className="inventory-header">
+            <div className="inventory-title">Target Block</div>
+          </div>
+          <div className="target-block-body">
+            <span
+              className="target-block-swatch"
+              style={{ backgroundColor: frontTileInfo.color }}
+            />
+            <div className="target-block-meta">
+              <div className="target-block-name">{frontTileInfo.name}</div>
+              {frontTileInfo.coords ? (
+                <div className="target-block-coords">
+                  X {frontTileInfo.coords.x} Y {frontTileInfo.coords.y}
+                </div>
+              ) : null}
+            </div>
           </div>
         </div>
       </div>

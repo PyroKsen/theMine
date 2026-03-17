@@ -160,6 +160,15 @@ export function createGameRenderer({
         if (type === TILE_TYPES.semiMagneticRock) color = 0x5f4b2b;
         if (type === TILE_TYPES.magneticRock) color = 0x7f6816;
         if (type === TILE_TYPES.acidRock) color = 0x1d4f2f;
+        if (type === TILE_TYPES.reinforcedRock) color = 0x3a272c;
+        if (type === TILE_TYPES.ironRock) color = 0x2d3135;
+        if (type === TILE_TYPES.steelRock) color = 0x1e2125;
+        if (type === TILE_TYPES.slimeRock) color = 0x2f6f44;
+        if (type === TILE_TYPES.corrosiveRock) color = 0x74d44f;
+        if (type === TILE_TYPES.radioactiveRock) color = 0x9dff2f;
+        if (type === TILE_TYPES.sand) color = 0xd4b24a;
+        if (type === TILE_TYPES.steelSand) color = 0x7fc9ff;
+        if (type === TILE_TYPES.magma) color = 0x6a1b08;
         if (type === TILE_TYPES.buildGreen) color = 0x3bd97a;
         if (type === TILE_TYPES.buildYellow) color = 0xf9c74f;
         if (type === TILE_TYPES.buildRed) color = 0xff6b6b;
@@ -1074,6 +1083,13 @@ export function createGameRenderer({
     updatePlacement
   };
 }
+
+
+
+
+
+
+
 
 
 

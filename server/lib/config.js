@@ -57,7 +57,16 @@ const TILE_TYPES = {
   dropBox: 13,
   semiMagneticRock: 14,
   magneticRock: 15,
-  acidRock: 16
+  acidRock: 16,
+  reinforcedRock: 17,
+  ironRock: 18,
+  steelRock: 19,
+  slimeRock: 20,
+  corrosiveRock: 21,
+  radioactiveRock: 22,
+  sand: 23,
+  steelSand: 24,
+  magma: 25
 };
 
 const CRYSTAL_TILE_TO_COLOR = new Map([
@@ -127,6 +136,15 @@ const TILE_HP = new Map([
   [TILE_TYPES.semiMagneticRock, 20],
   [TILE_TYPES.magneticRock, 50],
   [TILE_TYPES.acidRock, 50],
+  [TILE_TYPES.reinforcedRock, 400],
+  [TILE_TYPES.ironRock, 1000],
+  [TILE_TYPES.steelRock, 2000],
+  [TILE_TYPES.slimeRock, 150],
+  [TILE_TYPES.corrosiveRock, 250],
+  [TILE_TYPES.radioactiveRock, 500],
+  [TILE_TYPES.sand, 3],
+  [TILE_TYPES.steelSand, 10],
+  [TILE_TYPES.magma, 5],
   [TILE_TYPES.buildGreen, 5],
   [TILE_TYPES.buildYellow, 55],
   [TILE_TYPES.buildRed, 155],
@@ -275,6 +293,15 @@ module.exports = {
   TILE_HP,
   SKILL_DEFS
 };
+
+
+
+
+
+
+
+
+
 
 
 

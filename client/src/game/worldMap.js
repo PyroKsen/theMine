@@ -78,6 +78,15 @@ export function drawWorldMapCanvas({
           if (type === TILE_TYPES.semiMagneticRock) color = "#5f4b2b";
           if (type === TILE_TYPES.magneticRock) color = "#7f6816";
           if (type === TILE_TYPES.acidRock) color = "#1d4f2f";
+          if (type === TILE_TYPES.reinforcedRock) color = "#3a272c";
+          if (type === TILE_TYPES.ironRock) color = "#2d3135";
+          if (type === TILE_TYPES.steelRock) color = "#1e2125";
+          if (type === TILE_TYPES.slimeRock) color = "#2f6f44";
+          if (type === TILE_TYPES.corrosiveRock) color = "#74d44f";
+          if (type === TILE_TYPES.radioactiveRock) color = "#9dff2f";
+          if (type === TILE_TYPES.sand) color = "#d4b24a";
+          if (type === TILE_TYPES.steelSand) color = "#7fc9ff";
+          if (type === TILE_TYPES.magma) color = "#6a1b08";
           if (type === TILE_TYPES.buildGreen) color = "#3bd97a";
           if (type === TILE_TYPES.buildYellow) color = "#f9c74f";
           if (type === TILE_TYPES.buildRed) color = "#ff6b6b";
@@ -222,6 +231,13 @@ export function getMapHoverPosition({ wrap, mapData, mapView, clientX, clientY }
     inside: true
   };
 }
+
+
+
+
+
+
+
 
 
 

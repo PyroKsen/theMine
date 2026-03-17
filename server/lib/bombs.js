@@ -32,6 +32,15 @@ function createBombManager({ mapStore, players, broadcast, applyDamageToPlayer }
       type === TILE_TYPES.semiMagneticRock ||
       type === TILE_TYPES.magneticRock ||
       type === TILE_TYPES.acidRock ||
+      type === TILE_TYPES.reinforcedRock ||
+      type === TILE_TYPES.ironRock ||
+      type === TILE_TYPES.steelRock ||
+      type === TILE_TYPES.slimeRock ||
+      type === TILE_TYPES.corrosiveRock ||
+      type === TILE_TYPES.radioactiveRock ||
+      type === TILE_TYPES.sand ||
+      type === TILE_TYPES.steelSand ||
+      type === TILE_TYPES.magma ||
       type === TILE_TYPES.crystalGreen ||
       type === TILE_TYPES.crystalBlue ||
       type === TILE_TYPES.crystalWhite ||
@@ -152,6 +161,12 @@ function createBombManager({ mapStore, players, broadcast, applyDamageToPlayer }
 module.exports = {
   createBombManager
 };
+
+
+
+
+
+
 
 
 

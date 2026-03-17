@@ -84,6 +84,15 @@ function generateInitialMap(setTile) {
   fillRect(setTile, 12, 4, 1, 1, TILE_TYPES.semiMagneticRock);
   fillRect(setTile, 13, 4, 1, 1, TILE_TYPES.magneticRock);
   fillRect(setTile, 14, 4, 1, 1, TILE_TYPES.acidRock);
+  fillRect(setTile, 15, 4, 1, 1, TILE_TYPES.reinforcedRock);
+  fillRect(setTile, 16, 4, 1, 1, TILE_TYPES.ironRock);
+  fillRect(setTile, 17, 4, 1, 1, TILE_TYPES.steelRock);
+  fillRect(setTile, 18, 4, 1, 1, TILE_TYPES.slimeRock);
+  fillRect(setTile, 19, 4, 1, 1, TILE_TYPES.corrosiveRock);
+  fillRect(setTile, 20, 4, 1, 1, TILE_TYPES.radioactiveRock);
+  fillRect(setTile, 21, 4, 1, 1, TILE_TYPES.sand);
+  fillRect(setTile, 22, 4, 1, 1, TILE_TYPES.steelSand);
+  fillRect(setTile, 23, 4, 1, 1, TILE_TYPES.magma);
 
   const patches = [
     { x: 18, y: 6, w: 6, h: 4, type: TILE_TYPES.crystalGreen },
@@ -103,7 +112,24 @@ function generateInitialMap(setTile) {
     { x: 40, y: 32, w: 6, h: 5, type: TILE_TYPES.crystalWhite },
     { x: 48, y: 32, w: 5, h: 5, type: TILE_TYPES.crystalRed },
     { x: 56, y: 32, w: 5, h: 5, type: TILE_TYPES.crystalPink },
-    { x: 64, y: 32, w: 5, h: 5, type: TILE_TYPES.crystalCyan }
+    { x: 64, y: 32, w: 5, h: 5, type: TILE_TYPES.crystalCyan },
+    { x: 72, y: 8, w: 5, h: 4, type: TILE_TYPES.blackRock },
+    { x: 78, y: 8, w: 5, h: 4, type: TILE_TYPES.redRock },
+    { x: 84, y: 8, w: 5, h: 4, type: TILE_TYPES.semiMagneticRock },
+    { x: 90, y: 8, w: 5, h: 4, type: TILE_TYPES.magneticRock },
+    { x: 72, y: 16, w: 5, h: 4, type: TILE_TYPES.acidRock },
+    { x: 78, y: 16, w: 5, h: 4, type: TILE_TYPES.slimeRock },
+    { x: 84, y: 16, w: 5, h: 4, type: TILE_TYPES.corrosiveRock },
+    { x: 90, y: 16, w: 5, h: 4, type: TILE_TYPES.radioactiveRock },
+    { x: 72, y: 24, w: 5, h: 4, type: TILE_TYPES.reinforcedRock },
+    { x: 78, y: 24, w: 5, h: 4, type: TILE_TYPES.ironRock },
+    { x: 84, y: 24, w: 5, h: 4, type: TILE_TYPES.steelRock },
+    { x: 8, y: 44, w: 6, h: 2, type: TILE_TYPES.rock },
+    { x: 18, y: 44, w: 6, h: 2, type: TILE_TYPES.blackRock },
+    { x: 28, y: 44, w: 6, h: 2, type: TILE_TYPES.reinforcedRock },
+    { x: 9, y: 36, w: 4, h: 4, type: TILE_TYPES.sand },
+    { x: 19, y: 36, w: 4, h: 4, type: TILE_TYPES.steelSand },
+    { x: 29, y: 36, w: 4, h: 4, type: TILE_TYPES.magma }
   ];
 
   for (const patch of patches) {
@@ -209,6 +235,14 @@ module.exports = {
   createMapStore,
   encodeChunk
 };
+
+
+
+
+
+
+
+
 
 
 
