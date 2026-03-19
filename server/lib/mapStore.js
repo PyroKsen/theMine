@@ -6,6 +6,7 @@ const {
   TILE_TYPES,
   TILE_HP
 } = require("./config");
+const { recoverAtomicBackup, writeFileAtomic } = require("./persistence");
 
 const MAP_MAGIC = "TMAP";
 const MAP_VERSION = 1;
@@ -15,6 +16,7 @@ function layerIndex(x, y) {
 }
 
 function loadLayer(filePath, expectedW, expectedH) {
+  recoverAtomicBackup(filePath);
   if (!fs.existsSync(filePath)) return null;
   try {
     const buf = fs.readFileSync(filePath);
@@ -43,7 +45,7 @@ function saveLayer(filePath, layer, w, h) {
   header.writeUInt16LE(h, 8);
   header.writeUInt16LE(0, 10);
   const body = Buffer.from(layer.buffer, layer.byteOffset, layer.byteLength);
-  fs.writeFileSync(filePath, Buffer.concat([header, body]));
+  writeFileAtomic(filePath, Buffer.concat([header, body]));
 }
 
 function encodeChunk(layer, cx, cy, chunkSize = 64) {
@@ -206,6 +208,26 @@ function createMapStore(dataDir) {
     return encodeChunk(buildingTiles, cx, cy, chunkSize);
   }
 
+  function replaceBuildingLayer(nextLayer) {
+    if (!(nextLayer instanceof Uint8Array)) {
+      throw new Error("nextLayer must be Uint8Array");
+    }
+    if (nextLayer.length !== buildingTiles.length) {
+      throw new Error("nextLayer size mismatch");
+    }
+    let changed = 0;
+    for (let i = 0; i < buildingTiles.length; i += 1) {
+      if (buildingTiles[i] !== nextLayer[i]) {
+        changed += 1;
+      }
+    }
+    if (changed > 0) {
+      buildingTiles = new Uint8Array(nextLayer);
+      buildingDirty = true;
+    }
+    return changed;
+  }
+
   function flushDirty() {
     if (mapDirty) {
       saveLayer(mapFile, mapTiles, MAP_W, MAP_H);
@@ -227,6 +249,7 @@ function createMapStore(dataDir) {
     deleteTileHp,
     encodeMapChunk,
     encodeBuildingChunk,
+    replaceBuildingLayer,
     flushDirty
   };
 }

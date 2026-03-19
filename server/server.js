@@ -55,6 +55,7 @@ const { createAuthServer } = require("./lib/authServer");
 const { createWorldActions } = require("./lib/worldActions");
 const { attachRealtimeServer } = require("./lib/realtimeServer");
 const { createMapStore } = require("./lib/mapStore");
+const { validateAndRepairWorldState } = require("./lib/worldValidation");
 
 const PORT = Number(process.env.PORT || 8080);
 const SKILL_DEFAULTS = SKILL_DEFS.flatMap(() => [0, 0]);
@@ -77,6 +78,7 @@ const {
   stmtUpdateUserPos,
   stmtUpdateExplored,
   stmtUpdateSkillSlots,
+  stmtSelectUsersWithRespawnBuildingId,
   stmtUpdateRespawnBuildingId,
   stmtUpdateDollars,
   stmtUpdateHp,
@@ -88,7 +90,9 @@ const {
   stmtUpdateCrystalRed,
   stmtUpdateCrystalPink,
   stmtUpdateCrystalCyan,
-  skillUpdateStmts
+  skillUpdateStmts,
+  buildingDb,
+  dropBoxDb
 } = createDb(dataDir);
 
 const playerService = createPlayerService({
@@ -140,6 +144,7 @@ const bombManager = createBombManager({
 });
 const buildingManager = createBuildingManager({
   dataDir,
+  buildingDb,
   mapStore,
   players,
   bombByTile: bombManager.bombByTile,
@@ -151,6 +156,7 @@ bombManager.setBuildingHooks({
 });
 const worldActions = createWorldActions({
   dataDir,
+  dropBoxDb,
   mapStore,
   config: {
     MAP_W,
@@ -172,6 +178,14 @@ const worldActions = createWorldActions({
     playerService.sendToPlayer(player, { t: "respawn_selection", id: null });
   },
   broadcast
+});
+
+validateAndRepairWorldState({
+  dataDir,
+  buildingManager,
+  worldActions,
+  stmtSelectUsersWithRespawnBuildingId,
+  stmtUpdateRespawnBuildingId
 });
 
 attachRealtimeServer({

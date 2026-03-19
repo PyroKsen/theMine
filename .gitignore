@@ -7,3 +7,5 @@ server/dist
 .vscode/
 server/data/*.db
 analysis/
+server/data/world_meta.json
+server/data/*.bak

@@ -1,12 +1,19 @@
-﻿const fs = require("fs");
-const path = require("path");
-
 function calcGreenCost(base, level) {
   return Math.max(1, Math.ceil(base - (Number(level) || 0) * 0.01));
 }
 
+function parseJsonField(raw, fallback) {
+  if (!raw) return fallback;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return fallback;
+  }
+}
+
 function createWorldActions({
   dataDir,
+  dropBoxDb,
   mapStore,
   config,
   skillHelpers,
@@ -39,58 +46,160 @@ function createWorldActions({
     setTileHp,
     deleteTileHp
   } = mapStore;
+  const {
+    db,
+    stmtCountDropBoxes,
+    stmtSelectAllDropBoxes,
+    stmtInsertOrReplaceDropBox,
+    stmtDeleteDropBox
+  } = dropBoxDb;
 
   const crystalColors = Object.keys(CRYSTAL_PRICES || {});
-  const dropBoxesFile = path.join(dataDir, "drop_boxes.json");
   const dropBoxes = new Map();
-  let dropBoxesDirty = false;
+  const dirtyDropBoxes = new Map();
+  const deletedDropBoxes = new Set();
+  let purgedInvalidRows = 0;
+
+  function dropBoxKey(x, y) {
+    return `${x},${y}`;
+  }
+
+  function normalizeCrystals(raw) {
+    const crystals = {};
+    let total = 0;
+    for (const color of crystalColors) {
+      const value = Math.max(0, Math.floor(raw?.[color] || 0));
+      crystals[color] = value;
+      total += value;
+    }
+    return total > 0 ? crystals : null;
+  }
+
+  function setDropBoxRecord(x, y, crystals, createdAt = Date.now()) {
+    const key = dropBoxKey(x, y);
+    dropBoxes.set(key, {
+      x,
+      y,
+      crystals,
+      createdAt: Math.max(0, Math.floor(Number(createdAt) || Date.now()))
+    });
+  }
 
   function loadDropBoxes() {
-    if (!fs.existsSync(dropBoxesFile)) return;
-    try {
-      const raw = fs.readFileSync(dropBoxesFile, "utf-8");
-      const parsed = JSON.parse(raw);
-      if (!Array.isArray(parsed)) return;
-      for (const entry of parsed) {
-        const x = Number(entry?.x);
-        const y = Number(entry?.y);
-        if (!Number.isInteger(x) || !Number.isInteger(y)) continue;
-        if (x < 0 || x >= MAP_W || y < 0 || y >= MAP_H) continue;
-        const crystals = {};
-        let total = 0;
-        for (const color of crystalColors) {
-          const value = Math.max(0, Math.floor(entry?.crystals?.[color] || 0));
-          crystals[color] = value;
-          total += value;
-        }
-        if (total <= 0) continue;
-        if (
-          getTile(x, y) === TILE_TYPES.empty ||
-          getTile(x, y) === TILE_TYPES.dropBox
-        ) {
-          setTile(x, y, TILE_TYPES.dropBox);
-          setTileHp(x, y, 1);
-          dropBoxes.set(`${x},${y}`, crystals);
-        }
+    for (const row of stmtSelectAllDropBoxes.all()) {
+      const x = Number(row.x);
+      const y = Number(row.y);
+      if (!Number.isInteger(x) || !Number.isInteger(y)) {
+        stmtDeleteDropBox.run(row.x, row.y);
+        purgedInvalidRows += 1;
+        continue;
       }
-    } catch {
-      // ignore broken persistence
+      if (x < 0 || x >= MAP_W || y < 0 || y >= MAP_H) {
+        stmtDeleteDropBox.run(x, y);
+        purgedInvalidRows += 1;
+        continue;
+      }
+      const crystals = normalizeCrystals(parseJsonField(row.crystals_json, {}));
+      if (!crystals) {
+        stmtDeleteDropBox.run(x, y);
+        purgedInvalidRows += 1;
+        continue;
+      }
+      setDropBoxRecord(x, y, crystals, row.created_at);
     }
   }
 
-  function saveDropBoxes() {
-    const list = Array.from(dropBoxes.entries()).map(([key, crystals]) => {
+  const flushTxn = db.transaction(() => {
+    for (const key of deletedDropBoxes) {
       const [x, y] = key.split(",").map((value) => Number(value));
-      return { x, y, crystals };
-    });
-    fs.writeFileSync(dropBoxesFile, JSON.stringify(list));
-    dropBoxesDirty = false;
+      stmtDeleteDropBox.run(x, y);
+    }
+    for (const entry of dirtyDropBoxes.values()) {
+      stmtInsertOrReplaceDropBox.run({
+        x: entry.x,
+        y: entry.y,
+        crystalsJson: JSON.stringify(entry.crystals),
+        createdAt: entry.createdAt
+      });
+    }
+  });
+
+  function markDropBoxDirty(x, y) {
+    const key = dropBoxKey(x, y);
+    const record = dropBoxes.get(key);
+    if (!record) return;
+    deletedDropBoxes.delete(key);
+    dirtyDropBoxes.set(key, record);
+  }
+
+  function markDropBoxDeleted(x, y) {
+    const key = dropBoxKey(x, y);
+    dirtyDropBoxes.delete(key);
+    deletedDropBoxes.add(key);
   }
 
   function flush() {
-    if (dropBoxesDirty) {
-      saveDropBoxes();
+    if (dirtyDropBoxes.size === 0 && deletedDropBoxes.size === 0) return;
+    flushTxn();
+    dirtyDropBoxes.clear();
+    deletedDropBoxes.clear();
+  }
+
+  function syncDropBoxesOnMap() {
+    const liveDropBoxes = new Set(dropBoxes.keys());
+    let restoredTiles = 0;
+    let clearedTiles = 0;
+    let removedEntries = purgedInvalidRows;
+    let terrainConflicts = 0;
+    purgedInvalidRows = 0;
+
+    for (const [key, record] of dropBoxes) {
+      const { x, y } = record;
+      if (getBuilding(x, y) !== BUILDING_TYPES.none) {
+        dropBoxes.delete(key);
+        markDropBoxDeleted(x, y);
+        removedEntries += 1;
+        continue;
+      }
+      const tileType = getTile(x, y);
+      if (tileType !== TILE_TYPES.empty && tileType !== TILE_TYPES.dropBox) {
+        dropBoxes.delete(key);
+        markDropBoxDeleted(x, y);
+        removedEntries += 1;
+        terrainConflicts += 1;
+        continue;
+      }
+      if (getTile(x, y) !== TILE_TYPES.dropBox) {
+        setTile(x, y, TILE_TYPES.dropBox);
+        restoredTiles += 1;
+      }
+      setTileHp(x, y, 1);
     }
+
+    if (removedEntries > 0) {
+      liveDropBoxes.clear();
+      for (const key of dropBoxes.keys()) {
+        liveDropBoxes.add(key);
+      }
+    }
+
+    for (let y = 0; y < MAP_H; y += 1) {
+      for (let x = 0; x < MAP_W; x += 1) {
+        if (getTile(x, y) !== TILE_TYPES.dropBox) continue;
+        if (liveDropBoxes.has(dropBoxKey(x, y))) continue;
+        setTile(x, y, TILE_TYPES.empty);
+        deleteTileHp(x, y);
+        clearedTiles += 1;
+      }
+    }
+
+    return {
+      restoredTiles,
+      clearedTiles,
+      removedEntries,
+      terrainConflicts,
+      dropBoxCount: dropBoxes.size
+    };
   }
 
   function damageTile(x, y, byId, onCrystalHit, damage = 1) {
@@ -161,7 +270,7 @@ function createWorldActions({
       });
       return false;
     }
-    if (bombByTile?.has(`${targetX},${targetY}`)) {
+    if (bombByTile?.has(dropBoxKey(targetX, targetY))) {
       sendToPlayer(player, {
         t: "drop_error",
         message: "That tile is occupied."
@@ -200,26 +309,26 @@ function createWorldActions({
 
     setTile(targetX, targetY, TILE_TYPES.dropBox);
     setTileHp(targetX, targetY, 1);
-    dropBoxes.set(`${targetX},${targetY}`, payload);
-    dropBoxesDirty = true;
+    setDropBoxRecord(targetX, targetY, payload, Date.now());
+    markDropBoxDirty(targetX, targetY);
     broadcast({ t: "tile", x: targetX, y: targetY, value: TILE_TYPES.dropBox });
     sendToPlayer(player, { t: "drop_ok" });
     return true;
   }
 
   function collectDropBox(player, x, y) {
-    const key = `${x},${y}`;
+    const key = dropBoxKey(x, y);
     const stored = dropBoxes.get(key);
     if (!stored) return;
     for (const color of crystalColors) {
-      const amount = Math.max(0, Math.floor(Number(stored[color] || 0)));
+      const amount = Math.max(0, Math.floor(Number(stored.crystals?.[color] || 0)));
       if (amount <= 0) continue;
       const have = player.inventory?.[color] ?? 0;
       setCrystalCount(player, color, have + amount);
     }
     sendToPlayer(player, { t: "inventory", inventory: player.inventory });
     dropBoxes.delete(key);
-    dropBoxesDirty = true;
+    markDropBoxDeleted(x, y);
   }
 
   function dropCrystalsOnDeath(player) {
@@ -236,17 +345,16 @@ function createWorldActions({
     sendToPlayer(player, { t: "inventory", inventory: player.inventory });
     if (total <= 0) return;
 
-    const key = `${player.tx},${player.ty}`;
     setTile(player.tx, player.ty, TILE_TYPES.dropBox);
     setTileHp(player.tx, player.ty, 1);
-    dropBoxes.set(key, payload);
+    setDropBoxRecord(player.tx, player.ty, payload, Date.now());
+    markDropBoxDirty(player.tx, player.ty);
     broadcast({
       t: "tile",
       x: player.tx,
       y: player.ty,
       value: TILE_TYPES.dropBox
     });
-    dropBoxesDirty = true;
   }
 
   function handlePlayerDeath(player) {
@@ -353,6 +461,7 @@ function createWorldActions({
   }
 
   loadDropBoxes();
+  flush();
 
   return {
     damageTile,
@@ -360,7 +469,8 @@ function createWorldActions({
     collectDropBox,
     handlePlayerDeath,
     handleBuildAction,
-    flush
+    flush,
+    syncDropBoxesOnMap
   };
 }
 

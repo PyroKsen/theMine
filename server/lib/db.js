@@ -17,6 +17,38 @@ function createDb(dataDir) {
       ", "
     )})`
   );
+  db.exec(
+    `CREATE TABLE IF NOT EXISTS buildings (
+      id TEXT PRIMARY KEY,
+      type TEXT NOT NULL,
+      x INTEGER NOT NULL,
+      y INTEGER NOT NULL,
+      w INTEGER NOT NULL,
+      h INTEGER NOT NULL,
+      owner TEXT NOT NULL DEFAULT 'Admin',
+      hp INTEGER NOT NULL,
+      max_hp INTEGER NOT NULL,
+      inactive INTEGER NOT NULL DEFAULT 0,
+      destroy_at INTEGER,
+      balance INTEGER NOT NULL DEFAULT 0,
+      fee INTEGER NOT NULL DEFAULT 0,
+      entrance_json TEXT,
+      center_json TEXT,
+      entrances_json TEXT,
+      tiles_json TEXT NOT NULL,
+      storage_json TEXT,
+      created_at INTEGER NOT NULL DEFAULT 0
+    )`
+  );
+  db.exec(
+    `CREATE TABLE IF NOT EXISTS drop_boxes (
+      x INTEGER NOT NULL,
+      y INTEGER NOT NULL,
+      crystals_json TEXT NOT NULL,
+      created_at INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (x, y)
+    )`
+  );
 
   const userColumns = new Set(
     db.prepare("PRAGMA table_info(users)").all().map((row) => row.name)
@@ -168,6 +200,11 @@ function createDb(dataDir) {
   const stmtUpdateSkillSlots = db.prepare(
     "UPDATE users SET skill_slots = ? WHERE username = ?"
   );
+  const stmtSelectUsersWithRespawnBuildingId = db.prepare(
+    `SELECT username, respawn_building_id
+    FROM users
+    WHERE respawn_building_id IS NOT NULL AND TRIM(respawn_building_id) <> ''`
+  );
   const stmtUpdateRespawnBuildingId = db.prepare(
     "UPDATE users SET respawn_building_id = ? WHERE username = ?"
   );
@@ -216,6 +253,112 @@ function createDb(dataDir) {
       }
     ])
   );
+  const stmtCountBuildings = db.prepare("SELECT COUNT(*) AS count FROM buildings");
+  const stmtSelectAllBuildings = db.prepare(
+    `SELECT
+      id,
+      type,
+      x,
+      y,
+      w,
+      h,
+      owner,
+      hp,
+      max_hp,
+      inactive,
+      destroy_at,
+      balance,
+      fee,
+      entrance_json,
+      center_json,
+      entrances_json,
+      tiles_json,
+      storage_json,
+      created_at
+    FROM buildings
+    ORDER BY created_at ASC, id ASC`
+  );
+  const stmtInsertOrReplaceBuilding = db.prepare(
+    `INSERT INTO buildings (
+      id,
+      type,
+      x,
+      y,
+      w,
+      h,
+      owner,
+      hp,
+      max_hp,
+      inactive,
+      destroy_at,
+      balance,
+      fee,
+      entrance_json,
+      center_json,
+      entrances_json,
+      tiles_json,
+      storage_json,
+      created_at
+    ) VALUES (
+      @id,
+      @type,
+      @x,
+      @y,
+      @w,
+      @h,
+      @owner,
+      @hp,
+      @maxHp,
+      @inactive,
+      @destroyAt,
+      @balance,
+      @fee,
+      @entranceJson,
+      @centerJson,
+      @entrancesJson,
+      @tilesJson,
+      @storageJson,
+      @createdAt
+    )
+    ON CONFLICT(id) DO UPDATE SET
+      type = excluded.type,
+      x = excluded.x,
+      y = excluded.y,
+      w = excluded.w,
+      h = excluded.h,
+      owner = excluded.owner,
+      hp = excluded.hp,
+      max_hp = excluded.max_hp,
+      inactive = excluded.inactive,
+      destroy_at = excluded.destroy_at,
+      balance = excluded.balance,
+      fee = excluded.fee,
+      entrance_json = excluded.entrance_json,
+      center_json = excluded.center_json,
+      entrances_json = excluded.entrances_json,
+      tiles_json = excluded.tiles_json,
+      storage_json = excluded.storage_json,
+      created_at = excluded.created_at`
+  );
+  const stmtDeleteBuilding = db.prepare("DELETE FROM buildings WHERE id = ?");
+  const stmtDeleteAllBuildings = db.prepare("DELETE FROM buildings");
+  const stmtCountDropBoxes = db.prepare("SELECT COUNT(*) AS count FROM drop_boxes");
+  const stmtSelectAllDropBoxes = db.prepare(
+    `SELECT x, y, crystals_json, created_at
+    FROM drop_boxes
+    ORDER BY created_at ASC, x ASC, y ASC`
+  );
+  const stmtInsertOrReplaceDropBox = db.prepare(
+    `INSERT INTO drop_boxes (x, y, crystals_json, created_at)
+    VALUES (@x, @y, @crystalsJson, @createdAt)
+    ON CONFLICT(x, y) DO UPDATE SET
+      crystals_json = excluded.crystals_json,
+      created_at = excluded.created_at`
+  );
+  const stmtDeleteDropBox = db.prepare(
+    "DELETE FROM drop_boxes WHERE x = ? AND y = ?"
+  );
+  const stmtDeleteAllDropBoxes = db.prepare("DELETE FROM drop_boxes");
 
   return {
     db,
@@ -224,6 +367,7 @@ function createDb(dataDir) {
     stmtUpdateUserPos,
     stmtUpdateExplored,
     stmtUpdateSkillSlots,
+    stmtSelectUsersWithRespawnBuildingId,
     stmtUpdateRespawnBuildingId,
     stmtUpdateDollars,
     stmtUpdateHp,
@@ -235,7 +379,23 @@ function createDb(dataDir) {
     stmtUpdateCrystalRed,
     stmtUpdateCrystalPink,
     stmtUpdateCrystalCyan,
-    skillUpdateStmts
+    skillUpdateStmts,
+    buildingDb: {
+      db,
+      stmtCountBuildings,
+      stmtSelectAllBuildings,
+      stmtInsertOrReplaceBuilding,
+      stmtDeleteBuilding,
+      stmtDeleteAllBuildings
+    },
+    dropBoxDb: {
+      db,
+      stmtCountDropBoxes,
+      stmtSelectAllDropBoxes,
+      stmtInsertOrReplaceDropBox,
+      stmtDeleteDropBox,
+      stmtDeleteAllDropBoxes
+    }
   };
 }
 

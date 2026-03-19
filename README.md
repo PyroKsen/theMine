@@ -29,6 +29,14 @@ This repo is a monorepo that contains both the desktop client and the authoritat
 3. The server broadcasts snapshots of all player positions.
 4. The client interpolates snapshots for smooth rendering.
 
+## World Persistence
+1. Terrain is stored in `server/data/map.bin`.
+2. Buildings are stored in the `buildings` table inside `server/data/themine.db`.
+3. Building occupancy cache is stored in `server/data/buildings.bin` and repaired from SQLite buildings on startup.
+4. Drop boxes are stored in the `drop_boxes` table inside `server/data/themine.db`.
+5. Player/accounts state is stored in `server/data/themine.db`.
+6. Startup validation repairs `buildings.bin` and drop-box map markers before the realtime server begins accepting players.
+
 ## Run (Dev)
 1. Install dependencies:
 ```
