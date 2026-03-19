@@ -4,6 +4,7 @@ import {
   DEFAULT_MAP,
   DEFAULT_SKILL_CONFIG,
   DEPTH_PER_LEVEL,
+  TILE_BASE_HP,
   TILE_DISPLAY
 } from "./constants.js";
 import { chunkKey, formatSkillTotal } from "./helpers.js";
@@ -72,6 +73,7 @@ export default function GameView({ token, onAuthExpired }) {
   const hydrateCacheRef = useRef(null);
   const usernameRef = useRef("");
   const chunkRequestTimeRef = useRef(new Map());
+  const tileHpRef = useRef(new Map());
   const localPlayerRef = useRef({
     tx: 0,
     ty: 0,
@@ -239,9 +241,7 @@ export default function GameView({ token, onAuthExpired }) {
     skillSlots,
     skills,
     wallet
-  });
-
-  const statusLabel =
+  });  const statusLabel =
     status === "connecting"
       ? "Connecting"
       : status === "online"
@@ -250,6 +250,8 @@ export default function GameView({ token, onAuthExpired }) {
       ? "Offline"
       : status === "unauthorized"
       ? "Unauthorized"
+      : status === "already_online"
+      ? "Already online"
       : status;
   const selectedRespawnBuilding = respawnBuildingId
     ? buildingsRef.current.find((building) => building.id === respawnBuildingId) || null
@@ -279,19 +281,30 @@ export default function GameView({ token, onAuthExpired }) {
     return loadedChunk.data[ly * loadedChunk.w + lx];
   }
 
+  function getTrackedTileHp(tx, ty, type) {
+    if (type == null) return null;
+    const tracked = tileHpRef.current.get(`${tx},${ty}`);
+    if (tracked && Number.isFinite(tracked.current) && Number.isFinite(tracked.max)) {
+      return tracked;
+    }
+    const base = TILE_BASE_HP[type];
+    if (!Number.isFinite(base)) return null;
+    return { current: base, max: base };
+  }
+
   const frontTileInfo = (() => {
     const player = localPlayerRef.current;
     if (!player.ready) {
-      return { name: "Unknown", color: "#253140", coords: null };
+      return { name: "Unknown", color: "#253140", coords: null, hp: null };
     }
     const tx = player.tx + player.fx;
     const ty = player.ty + player.fy;
     const type = getLoadedTileType(tx, ty);
     if (type == null) {
-      return { name: "Unknown", color: "#253140", coords: { x: tx, y: ty } };
+      return { name: "Unknown", color: "#253140", coords: { x: tx, y: ty }, hp: null };
     }
     const display = TILE_DISPLAY[type] || { name: `Tile ${type}`, color: "#253140" };
-    return { ...display, coords: { x: tx, y: ty } };
+    return { ...display, coords: { x: tx, y: ty }, hp: getTrackedTileHp(tx, ty, type) };
   })();
 
   const isOverDepth = coords.y > maxDepth;
@@ -561,11 +574,14 @@ export default function GameView({ token, onAuthExpired }) {
     socket.addEventListener("open", () => {
       setStatus("online");
     });
-
     socket.addEventListener("close", (event) => {
       if (event.code === 4001) {
         setStatus("unauthorized");
         if (onAuthExpired) onAuthExpired();
+        return;
+      }
+      if (event.code === 4002) {
+        setStatus("already_online");
         return;
       }
       setStatus("offline");
@@ -615,7 +631,9 @@ export default function GameView({ token, onAuthExpired }) {
       createBombSprite: runtime.createBombSprite,
       updatePlacement: runtime.updatePlacement,
       saveCachedChunk,
-      resetDropValues
+      resetDropValues,
+      requestChunks,
+      tileHpRef
     });
 
     socket.addEventListener("message", handleSocketMessage);
@@ -772,6 +790,11 @@ export default function GameView({ token, onAuthExpired }) {
             />
             <div className="target-block-meta">
               <div className="target-block-name">{frontTileInfo.name}</div>
+              {frontTileInfo.hp ? (
+                <div className="target-block-coords">
+                  HP {frontTileInfo.hp.current}/{frontTileInfo.hp.max}
+                </div>
+              ) : null}
               {frontTileInfo.coords ? (
                 <div className="target-block-coords">
                   X {frontTileInfo.coords.x} Y {frontTileInfo.coords.y}

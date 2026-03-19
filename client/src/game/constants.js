@@ -173,6 +173,32 @@ export const TILE_TYPES = {
   magma: 25
 };
 
+export const TILE_BASE_HP = {
+  [TILE_TYPES.rock]: 3,
+  [TILE_TYPES.crystalGreen]: 6,
+  [TILE_TYPES.crystalBlue]: 6,
+  [TILE_TYPES.crystalWhite]: 10,
+  [TILE_TYPES.crystalRed]: 10,
+  [TILE_TYPES.crystalPink]: 10,
+  [TILE_TYPES.crystalCyan]: 6,
+  [TILE_TYPES.semiMagneticRock]: 20,
+  [TILE_TYPES.magneticRock]: 50,
+  [TILE_TYPES.acidRock]: 50,
+  [TILE_TYPES.reinforcedRock]: 400,
+  [TILE_TYPES.ironRock]: 1000,
+  [TILE_TYPES.steelRock]: 2000,
+  [TILE_TYPES.slimeRock]: 150,
+  [TILE_TYPES.corrosiveRock]: 250,
+  [TILE_TYPES.radioactiveRock]: 500,
+  [TILE_TYPES.sand]: 3,
+  [TILE_TYPES.steelSand]: 10,
+  [TILE_TYPES.magma]: 5,
+  [TILE_TYPES.buildGreen]: 5,
+  [TILE_TYPES.buildYellow]: 55,
+  [TILE_TYPES.buildRed]: 155,
+  [TILE_TYPES.dropBox]: 1
+};
+
 export const TILE_DISPLAY = {
   [TILE_TYPES.empty]: { name: "Empty", color: "#0b1016" },
   [TILE_TYPES.rock]: { name: "Rock", color: "#2b0f4d" },
@@ -208,16 +234,3 @@ export const FACING_ROTATIONS = new Map([
   ["0,1", Math.PI],
   ["-1,0", -Math.PI / 2]
 ]);
-
-
-
-
-
-
-
-
-
-
-
-
-

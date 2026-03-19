@@ -18,6 +18,8 @@ function attachRealtimeServer({
 }) {
   const {
     BASE_HP,
+    BASE_SPAWN_TX,
+    BASE_SPAWN_TY,
     DEPTH_OVERLOAD_INTERVAL_MS,
     TICK_RATE,
     MINE_COOLDOWN_MS,
@@ -263,9 +265,12 @@ function attachRealtimeServer({
     }
 
     const skillSlots = normalizeSkillSlots(saved?.skill_slots);
+    const fallbackSpawn = validSavedSpawn(BASE_SPAWN_TX, BASE_SPAWN_TY)
+      ? { tx: BASE_SPAWN_TX, ty: BASE_SPAWN_TY }
+      : randomSpawn();
     const spawn = validSavedSpawn(saved?.last_tx, saved?.last_ty)
       ? { tx: saved.last_tx, ty: saved.last_ty }
-      : randomSpawn();
+      : fallbackSpawn;
     const savedHp = saved?.hp ?? BASE_HP;
     const savedMaxHp = saved?.max_hp ?? BASE_HP;
     const skillHpLevel = skills.hp?.level ?? 0;
@@ -1003,6 +1008,8 @@ function attachRealtimeServer({
 module.exports = {
   attachRealtimeServer
 };
+
+
 
 
 

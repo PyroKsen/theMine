@@ -6,13 +6,29 @@ const {
   TILE_TYPES,
   TILE_HP
 } = require("./config");
-const { recoverAtomicBackup, writeFileAtomic } = require("./persistence");
+const {
+  readJsonFile,
+  recoverAtomicBackup,
+  writeFileAtomic,
+  writeJsonAtomic
+} = require("./persistence");
 
 const MAP_MAGIC = "TMAP";
 const MAP_VERSION = 1;
+const TILE_HP_FILE = "tile_hp.json";
 
 function layerIndex(x, y) {
   return y * MAP_W + x;
+}
+
+function tileHpKey(x, y) {
+  return `${x},${y}`;
+}
+
+function normalizeTileHp(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+  return Math.max(0, Math.round(numeric * 1000) / 1000);
 }
 
 function loadLayer(filePath, expectedW, expectedH) {
@@ -69,6 +85,43 @@ function fillRect(layerSetter, x0, y0, w, h, type) {
       layerSetter(x, y, type);
     }
   }
+}
+
+function loadTileHpOverrides(filePath, getTile) {
+  const raw = readJsonFile(filePath, []);
+  if (!Array.isArray(raw)) return [];
+  const overrides = [];
+  for (const entry of raw) {
+    const x = Math.floor(Number(entry?.x));
+    const y = Math.floor(Number(entry?.y));
+    const type = Math.floor(Number(entry?.type));
+    const hp = normalizeTileHp(entry?.hp);
+    if (!Number.isInteger(x) || !Number.isInteger(y)) continue;
+    if (!Number.isInteger(type) || !Number.isFinite(hp)) continue;
+    if (x < 0 || x >= MAP_W || y < 0 || y >= MAP_H) continue;
+    if (hp <= 0) continue;
+    if (getTile(x, y) !== type) continue;
+    if (!TILE_HP.has(type)) continue;
+    overrides.push({ x, y, type, hp });
+  }
+  return overrides;
+}
+
+function buildTileHpOverrides(tileHp, getTile) {
+  const overrides = [];
+  for (const [key, hp] of tileHp.entries()) {
+    const [xRaw, yRaw] = key.split(",");
+    const x = Number(xRaw);
+    const y = Number(yRaw);
+    if (!Number.isInteger(x) || !Number.isInteger(y)) continue;
+    const type = getTile(x, y);
+    const baseHp = TILE_HP.get(type);
+    const normalizedHp = normalizeTileHp(hp);
+    if (!baseHp || normalizedHp <= 0 || normalizedHp === baseHp) continue;
+    overrides.push({ x, y, type, hp: normalizedHp });
+  }
+  overrides.sort((a, b) => (a.y - b.y) || (a.x - b.x));
+  return overrides;
 }
 
 function generateInitialMap(setTile) {
@@ -143,11 +196,14 @@ function createMapStore(dataDir) {
   fs.mkdirSync(dataDir, { recursive: true });
   const mapFile = path.join(dataDir, "map.bin");
   const buildingsFile = path.join(dataDir, "buildings.bin");
+  const tileHpFile = path.join(dataDir, TILE_HP_FILE);
 
   let mapTiles = loadLayer(mapFile, MAP_W, MAP_H);
   let buildingTiles = loadLayer(buildingsFile, MAP_W, MAP_H);
   let mapDirty = false;
   let buildingDirty = false;
+  let tileHpDirty = false;
+  const tileHp = new Map();
 
   if (!mapTiles) {
     mapTiles = new Uint8Array(MAP_W * MAP_H);
@@ -158,16 +214,19 @@ function createMapStore(dataDir) {
     buildingTiles = new Uint8Array(MAP_W * MAP_H);
     buildingDirty = true;
   }
-
-  const tileHp = new Map();
+  tileHp.clear();
   for (let y = 0; y < MAP_H; y += 1) {
     for (let x = 0; x < MAP_W; x += 1) {
       const type = getTile(x, y);
       const hp = TILE_HP.get(type);
       if (hp) {
-        tileHp.set(`${x},${y}`, hp);
+        tileHp.set(tileHpKey(x, y), hp);
       }
     }
+  }
+
+  for (const entry of loadTileHpOverrides(tileHpFile, getTile)) {
+    tileHp.set(tileHpKey(entry.x, entry.y), entry.hp);
   }
 
   function getTile(x, y) {
@@ -177,6 +236,14 @@ function createMapStore(dataDir) {
   function setTile(x, y, type) {
     mapTiles[layerIndex(x, y)] = type;
     mapDirty = true;
+    tileHpDirty = true;
+    const baseHp = TILE_HP.get(type);
+    const key = tileHpKey(x, y);
+    if (baseHp) {
+      tileHp.set(key, baseHp);
+    } else {
+      tileHp.delete(key);
+    }
   }
 
   function getBuilding(x, y) {
@@ -189,15 +256,24 @@ function createMapStore(dataDir) {
   }
 
   function getTileHp(x, y) {
-    return tileHp.get(`${x},${y}`);
+    return tileHp.get(tileHpKey(x, y));
   }
 
   function setTileHp(x, y, hp) {
-    tileHp.set(`${x},${y}`, hp);
+    const safeHp = normalizeTileHp(hp);
+    const key = tileHpKey(x, y);
+    if (safeHp > 0) {
+      tileHp.set(key, safeHp);
+    } else {
+      tileHp.delete(key);
+    }
+    tileHpDirty = true;
   }
 
   function deleteTileHp(x, y) {
-    tileHp.delete(`${x},${y}`);
+    if (tileHp.delete(tileHpKey(x, y))) {
+      tileHpDirty = true;
+    }
   }
 
   function encodeMapChunk(cx, cy, chunkSize) {
@@ -237,6 +313,10 @@ function createMapStore(dataDir) {
       saveLayer(buildingsFile, buildingTiles, MAP_W, MAP_H);
       buildingDirty = false;
     }
+    if (tileHpDirty) {
+      writeJsonAtomic(tileHpFile, buildTileHpOverrides(tileHp, getTile));
+      tileHpDirty = false;
+    }
   }
 
   return {
@@ -258,11 +338,6 @@ module.exports = {
   createMapStore,
   encodeChunk
 };
-
-
-
-
-
 
 
 

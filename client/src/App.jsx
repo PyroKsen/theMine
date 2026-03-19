@@ -7,6 +7,7 @@ const AUTH_ERROR_MESSAGES = {
   bad_password: "Password must be 4 to 64 characters long.",
   user_exists: "That username is already taken.",
   invalid_credentials: "Incorrect username or password.",
+  already_online: "This account is already in the game.",
   db_error: "Server error. Please try again.",
   auth_failed: "Authentication failed. Please try again."
 };
@@ -205,3 +206,4 @@ export default function App() {
     </div>
   );
 }
+

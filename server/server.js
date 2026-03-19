@@ -1,9 +1,11 @@
-﻿const fs = require("fs");
+const fs = require("fs");
 const path = require("path");
 const WebSocket = require("ws");
 
 const {
   BASE_HP,
+  BASE_SPAWN_TX,
+  BASE_SPAWN_TY,
   DEPTH_OVERLOAD_INTERVAL_MS,
   TICK_RATE,
   MINE_COOLDOWN_MS,
@@ -64,7 +66,7 @@ const dataDir = path.join(__dirname, "data");
 fs.mkdirSync(dataDir, { recursive: true });
 
 const mapStore = createMapStore(dataDir);
-const { getTile, getBuilding } = mapStore;
+const { getTile, getBuilding, flushDirty } = mapStore;
 
 function isWalkable(x, y) {
   if (x < 0 || x >= MAP_W || y < 0 || y >= MAP_H) return false;
@@ -73,6 +75,7 @@ function isWalkable(x, y) {
 }
 
 const {
+  migrationResult: dbMigrationResult,
   stmtInsertUser,
   stmtGetUser,
   stmtUpdateUserPos,
@@ -94,6 +97,16 @@ const {
   buildingDb,
   dropBoxDb
 } = createDb(dataDir);
+
+if (dbMigrationResult.appliedMigrations.length > 0) {
+  for (const migration of dbMigrationResult.appliedMigrations) {
+    console.log(`[db] migrated to v${migration.version}: ${migration.description}`);
+  }
+} else if (dbMigrationResult.adoptedLegacyVersion) {
+  console.log(
+    `[db] adopted legacy schema baseline v${dbMigrationResult.adoptedLegacyVersion} with no new migrations`
+  );
+}
 
 const playerService = createPlayerService({
   mapWidth: MAP_W,
@@ -118,12 +131,15 @@ const sessions = new Map();
 const players = new Map();
 const server = createAuthServer({
   sessions,
+  players,
   stmtInsertUser,
   stmtGetUser,
   serializeSkillSlots,
   emptySkillSlots: EMPTY_SKILL_SLOTS,
   skillDefaults: SKILL_DEFAULTS,
-  baseHp: BASE_HP
+  baseHp: BASE_HP,
+  spawnTx: BASE_SPAWN_TX,
+  spawnTy: BASE_SPAWN_TY
 });
 const wss = new WebSocket.Server({ server });
 
@@ -159,8 +175,10 @@ const worldActions = createWorldActions({
   dropBoxDb,
   mapStore,
   config: {
-    MAP_W,
-    MAP_H,
+      MAP_W,
+      MAP_H,
+      BASE_SPAWN_TX,
+      BASE_SPAWN_TY,
     TILE_TYPES,
     TILE_HP,
     BUILDING_TYPES,
@@ -179,6 +197,70 @@ const worldActions = createWorldActions({
   },
   broadcast
 });
+const { flush: flushBuildings } = buildingManager;
+const { flush: flushWorldActions } = worldActions;
+
+function flushAllPersistence(context = "runtime") {
+  const errors = [];
+  for (const [label, fn] of [
+    ["map", flushDirty],
+    ["buildings", flushBuildings],
+    ["worldActions", flushWorldActions]
+  ]) {
+    try {
+      fn();
+    } catch (error) {
+      errors.push({ label, error });
+    }
+  }
+  if (errors.length > 0) {
+    const detail = errors
+      .map(({ label, error }) => `${label}: ${error?.message || error}`)
+      .join("; ");
+    throw new Error(`flushAllPersistence failed during ${context}: ${detail}`);
+  }
+}
+
+let shutdownStarted = false;
+function shutdownGracefully(context, exitCode = 0, error = null) {
+  if (shutdownStarted) return;
+  shutdownStarted = true;
+
+  if (error) {
+    console.error(`[shutdown] ${context}`, error);
+  } else {
+    console.log(`[shutdown] ${context}`);
+  }
+
+  try {
+    flushAllPersistence(context);
+  } catch (flushError) {
+    console.error(flushError);
+    exitCode = exitCode || 1;
+  }
+
+  try {
+    wss.close();
+  } catch {
+    // ignore websocket close failures during shutdown
+  }
+
+  try {
+    server.close(() => process.exit(exitCode));
+    setTimeout(() => process.exit(exitCode), 3000).unref();
+  } catch {
+    process.exit(exitCode);
+  }
+}
+
+process.on("SIGINT", () => shutdownGracefully("SIGINT", 0));
+process.on("SIGTERM", () => shutdownGracefully("SIGTERM", 0));
+process.on("uncaughtException", (error) =>
+  shutdownGracefully("uncaughtException", 1, error)
+);
+process.on("unhandledRejection", (reason) =>
+  shutdownGracefully("unhandledRejection", 1, reason)
+);
 
 validateAndRepairWorldState({
   dataDir,
@@ -188,13 +270,16 @@ validateAndRepairWorldState({
   stmtUpdateRespawnBuildingId
 });
 
+flushAllPersistence("startup_repair");
 attachRealtimeServer({
   wss,
   sessions,
   players,
   config: {
-    BASE_HP,
-    DEPTH_OVERLOAD_INTERVAL_MS,
+      BASE_HP,
+      BASE_SPAWN_TX,
+      BASE_SPAWN_TY,
+      DEPTH_OVERLOAD_INTERVAL_MS,
     TICK_RATE,
     MINE_COOLDOWN_MS,
     CHAT_MAX_LEN,
@@ -255,3 +340,8 @@ attachRealtimeServer({
 server.listen(PORT, () => {
   console.log(`Server listening on ws://localhost:${PORT}`);
 });
+
+
+
+
+

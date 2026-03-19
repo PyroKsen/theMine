@@ -2,6 +2,12 @@ function calcGreenCost(base, level) {
   return Math.max(1, Math.ceil(base - (Number(level) || 0) * 0.01));
 }
 
+function normalizeTileHp(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+  return Math.max(0, Math.round(numeric * 1000) / 1000);
+}
+
 function parseJsonField(raw, fallback) {
   if (!raw) return fallback;
   try {
@@ -30,6 +36,8 @@ function createWorldActions({
   const {
     MAP_W,
     MAP_H,
+    BASE_SPAWN_TX,
+    BASE_SPAWN_TY,
     TILE_TYPES,
     TILE_HP,
     BUILDING_TYPES,
@@ -211,15 +219,15 @@ function createWorldActions({
     if (!hpMax) {
       return { hit: false, broken: false, type };
     }
-    const current = getTileHp(x, y) ?? hpMax;
-    const safeDamage = Math.max(0, Number(damage) || 0);
-    const dealt = Math.min(current, safeDamage);
-    const next = current - dealt;
+    const current = normalizeTileHp(getTileHp(x, y) ?? hpMax);
+    const safeDamage = normalizeTileHp(Math.max(0, Number(damage) || 0));
+    const dealt = normalizeTileHp(Math.min(current, safeDamage));
+    const next = normalizeTileHp(current - dealt);
     let amount = 0;
     if (dealt > 0 && type !== TILE_TYPES.rock && typeof onCrystalHit === "function") {
       amount = Number(onCrystalHit(type, dealt) || 0);
     }
-    broadcast({ t: "hit", x, y, by: byId, type, amount });
+    broadcast({ t: "hit", x, y, by: byId, type, amount, hpCurrent: normalizeTileHp(next), hpMax: normalizeTileHp(hpMax) });
     if (next <= 0) {
       setTile(x, y, TILE_TYPES.empty);
       deleteTileHp(x, y);
@@ -366,8 +374,8 @@ function createWorldActions({
       stmtUpdateRespawnBuildingId?.run(null, player.username);
       clearRespawnSelection?.(player);
     }
-    player.tx = respawn?.tx ?? 1;
-    player.ty = respawn?.ty ?? 1;
+    player.tx = respawn?.tx ?? BASE_SPAWN_TX;
+    player.ty = respawn?.ty ?? BASE_SPAWN_TY;
     player.facingX = 0;
     player.facingY = 1;
     player.moveCooldownMs = 0;
@@ -477,3 +485,10 @@ function createWorldActions({
 module.exports = {
   createWorldActions
 };
+
+
+
+
+
+
+

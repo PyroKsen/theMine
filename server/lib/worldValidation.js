@@ -1,4 +1,4 @@
-const { ensureWorldMetadata } = require("./persistence");
+const { migrateWorldMetadata } = require("./persistence");
 
 function logRepair(prefix, details) {
   console.log(`[world] ${prefix}: ${details}`);
@@ -23,10 +23,12 @@ function validateAndRepairWorldState({
   stmtSelectUsersWithRespawnBuildingId,
   stmtUpdateRespawnBuildingId
 }) {
-  const { filePath, metadata } = ensureWorldMetadata(dataDir);
+  const migrationResult = migrateWorldMetadata(dataDir, {
+    logger: (message) => console.log(message)
+  });
   logRepair(
     "schema",
-    `v${metadata.schemaVersion} metadata loaded from ${filePath}`
+    `v${migrationResult.metadata.schemaVersion} metadata loaded from ${migrationResult.filePath}`
   );
 
   const buildingResult = buildingManager.validateAndRepairBuildings();
@@ -73,7 +75,8 @@ function validateAndRepairWorldState({
   }
 
   return {
-    metadata,
+    metadata: migrationResult.metadata,
+    migrationResult,
     buildingResult,
     clearedRespawnSelections,
     dropBoxResult

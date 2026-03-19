@@ -88,7 +88,9 @@ export function createSocketMessageHandler({
   createBombSprite,
   updatePlacement,
   saveCachedChunk,
-  resetDropValues
+  resetDropValues,
+  requestChunks,
+  tileHpRef
 }) {
   function upsertBuilding(building) {
     if (!building?.id) return;
@@ -106,6 +108,15 @@ export function createSocketMessageHandler({
     buildingsRef.current = buildingsRef.current.filter(
       (building) => building.id !== id
     );
+  }
+
+  function refreshChunkIfNeeded(cx, cy) {
+    const key = chunkKey(cx, cy);
+    staleChunksRef.current.add(key);
+    loadedChunksRef.current.delete(key);
+    if (typeof requestChunks === "function") {
+      requestChunks([{ cx, cy }], { force: true });
+    }
   }
 
   return (event) => {
@@ -215,8 +226,14 @@ export function createSocketMessageHandler({
     }
 
     if (msg.t === "tile") {
-      const inView = isTileWithinView(msg.x, msg.y);
-      if (inView) {
+      const chunkSize = mapDataRef.current.chunk || DEFAULT_MAP.chunk;
+      const cx = Math.floor(Number(msg.x) / chunkSize);
+      const cy = Math.floor(Number(msg.y) / chunkSize);
+      const key = chunkKey(cx, cy);
+      const hasChunk = mapDataRef.current.tiles.has(key);
+
+      tileHpRef.current.delete(`${msg.x},${msg.y}`);
+      if (hasChunk) {
         const updated = setChunkValue(
           mapDataRef.current.tiles,
           msg.x,
@@ -226,14 +243,11 @@ export function createSocketMessageHandler({
         if (updated) {
           drawTerrainChunk(updated.cx, updated.cy);
           requestMapDraw();
+        } else {
+          refreshChunkIfNeeded(cx, cy);
         }
       } else {
-        const chunkSize = mapDataRef.current.chunk || DEFAULT_MAP.chunk;
-        const cx = Math.floor(msg.x / chunkSize);
-        const cy = Math.floor(msg.y / chunkSize);
-        const key = chunkKey(cx, cy);
-        loadedChunksRef.current.delete(key);
-        staleChunksRef.current.add(key);
+        refreshChunkIfNeeded(cx, cy);
       }
     }
 
@@ -241,7 +255,14 @@ export function createSocketMessageHandler({
       if (Array.isArray(msg.tiles)) {
         const touched = new Set();
         for (const tile of msg.tiles) {
-          if (!isTileWithinView(tile.x, tile.y)) continue;
+          const chunkSize = mapDataRef.current.chunk || DEFAULT_MAP.chunk;
+          const cx = Math.floor(Number(tile.x) / chunkSize);
+          const cy = Math.floor(Number(tile.y) / chunkSize);
+          const key = chunkKey(cx, cy);
+          if (!mapDataRef.current.buildings.has(key) && !isTileWithinView(tile.x, tile.y)) {
+            refreshChunkIfNeeded(cx, cy);
+            continue;
+          }
           const updated = setChunkValue(
             mapDataRef.current.buildings,
             tile.x,
@@ -250,6 +271,8 @@ export function createSocketMessageHandler({
           );
           if (updated) {
             touched.add(chunkKey(updated.cx, updated.cy));
+          } else {
+            refreshChunkIfNeeded(cx, cy);
           }
         }
         for (const key of touched) {
@@ -278,6 +301,9 @@ export function createSocketMessageHandler({
       const touched = new Set();
       if (Array.isArray(msg.tiles)) {
         for (const tile of msg.tiles) {
+          const chunkSize = mapDataRef.current.chunk || DEFAULT_MAP.chunk;
+          const cx = Math.floor(Number(tile.x) / chunkSize);
+          const cy = Math.floor(Number(tile.y) / chunkSize);
           const updated = setChunkValue(
             mapDataRef.current.buildings,
             tile.x,
@@ -286,6 +312,8 @@ export function createSocketMessageHandler({
           );
           if (updated) {
             touched.add(chunkKey(updated.cx, updated.cy));
+          } else {
+            refreshChunkIfNeeded(cx, cy);
           }
         }
       }
@@ -444,6 +472,13 @@ export function createSocketMessageHandler({
           kind: "spark"
         });
 
+        if (Number.isFinite(msg.hpCurrent) && Number.isFinite(msg.hpMax)) {
+          tileHpRef.current.set(`${msg.x},${msg.y}`, {
+            current: Math.max(0, Number(msg.hpCurrent)),
+            max: Math.max(0, Number(msg.hpMax))
+          });
+        }
+
         if (msg.amount && msg.amount > 0) {
           const color = crystalColor(msg.type);
           if (color !== null) {
@@ -519,3 +554,7 @@ export function createSocketMessageHandler({
     }
   };
 }
+
+
+
+

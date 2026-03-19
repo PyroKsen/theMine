@@ -1,14 +1,25 @@
-﻿const http = require("http");
+const http = require("http");
 const crypto = require("crypto");
 
+function isUsernameActive(players, username) {
+  for (const player of players.values()) {
+    if (player?.username === username) {
+      return true;
+    }
+  }
+  return false;
+}
 function createAuthServer({
   sessions,
+  players,
   stmtInsertUser,
   stmtGetUser,
   serializeSkillSlots,
   emptySkillSlots,
   skillDefaults,
-  baseHp
+  baseHp,
+  spawnTx,
+  spawnTy
 }) {
   return http.createServer((req, res) => {
     const url = new URL(req.url || "/", "http://localhost");
@@ -48,6 +59,11 @@ function createAuthServer({
 
       const username = String(payload.username || "").trim();
       const password = String(payload.password || "");
+      if (isUsernameActive(players, username)) {
+        res.writeHead(409, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "already_online" }));
+        return;
+      }
 
       if (username.length < 3 || username.length > 20) {
         res.writeHead(400, { "Content-Type": "application/json" });
@@ -71,8 +87,8 @@ function createAuthServer({
             username,
             hash,
             Date.now(),
-            null,
-            null,
+            spawnTx,
+            spawnTy,
             null,
             serializeSkillSlots(emptySkillSlots),
             null,
@@ -119,3 +135,8 @@ function createAuthServer({
 module.exports = {
   createAuthServer
 };
+
+
+
+
+

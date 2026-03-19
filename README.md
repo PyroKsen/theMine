@@ -31,11 +31,14 @@ This repo is a monorepo that contains both the desktop client and the authoritat
 
 ## World Persistence
 1. Terrain is stored in `server/data/map.bin`.
-2. Buildings are stored in the `buildings` table inside `server/data/themine.db`.
-3. Building occupancy cache is stored in `server/data/buildings.bin` and repaired from SQLite buildings on startup.
-4. Drop boxes are stored in the `drop_boxes` table inside `server/data/themine.db`.
-5. Player/accounts state is stored in `server/data/themine.db`.
-6. Startup validation repairs `buildings.bin` and drop-box map markers before the realtime server begins accepting players.
+2. Tile HP overrides are stored in `server/data/tile_hp.json`.
+3. Buildings are stored in the `buildings` table inside `server/data/themine.db`.
+4. Building occupancy cache is stored in `server/data/buildings.bin` and repaired from SQLite buildings on startup.
+5. Drop boxes are stored in the `drop_boxes` table inside `server/data/themine.db`.
+6. Player/accounts state is stored in `server/data/themine.db`.
+7. World persistence metadata and world schema history are stored in `server/data/world_meta.json`.
+8. Startup validation repairs `buildings.bin` and drop-box map markers before the realtime server begins accepting players.
+9. Persistence and migration policy is documented in `server/PERSISTENCE.md`.
 
 ## Run (Dev)
 1. Install dependencies:
@@ -53,6 +56,8 @@ npm run dev
 3. `npm run dev:client` - run client only
 4. `npm run build` - build client
 5. `npm run start` - run server (production)
+6. `npm -w server run test:recovery` - run persistence and recovery smoke-tests
+7. `npm -w server run inspect:persistence` - print DB/world schema versions and sources of truth from `server/data`
 
 ## Ports
 1. Server: `ws://localhost:8080`
@@ -63,6 +68,7 @@ npm run dev
 2. `client/src/game/` - game renderer and networking
 3. `client/electron/` - Electron main process
 4. `server/` - Node.js authoritative game server
+5. `server/PERSISTENCE.md` - persistence layout, migrations, and repair policy
 
 ## Roadmap (Short)
 1. Tile resource data and mining actions

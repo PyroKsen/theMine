@@ -3,6 +3,8 @@
   "private": true,
   "scripts": {
     "dev": "nodemon server.js",
+    "test:recovery": "node scripts/recoverySmoke.js",
+    "inspect:persistence": "node scripts/persistenceStatus.js",
     "start": "node server.js"
   },
   "dependencies": {
