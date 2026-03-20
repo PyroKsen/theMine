@@ -170,7 +170,14 @@ export const TILE_TYPES = {
   radioactiveRock: 22,
   sand: 23,
   steelSand: 24,
-  magma: 25
+  magma: 25,
+  liveCrystalBlue: 26,
+  liveCrystalWhite: 27,
+  liveCrystalPink: 28,
+  liveCrystalRed: 29,
+  liveCrystalCyan: 30,
+  hypnoRock: 31,
+  liveCrystalRainbow: 32
 };
 
 export const TILE_BASE_HP = {
@@ -193,6 +200,12 @@ export const TILE_BASE_HP = {
   [TILE_TYPES.sand]: 3,
   [TILE_TYPES.steelSand]: 10,
   [TILE_TYPES.magma]: 5,
+  [TILE_TYPES.liveCrystalBlue]: 10,
+  [TILE_TYPES.liveCrystalWhite]: 10,
+  [TILE_TYPES.liveCrystalPink]: 10,
+  [TILE_TYPES.liveCrystalRed]: 10,
+  [TILE_TYPES.liveCrystalCyan]: 10,
+  [TILE_TYPES.liveCrystalRainbow]: 30,
   [TILE_TYPES.buildGreen]: 5,
   [TILE_TYPES.buildYellow]: 55,
   [TILE_TYPES.buildRed]: 155,
@@ -225,7 +238,14 @@ export const TILE_DISPLAY = {
   [TILE_TYPES.radioactiveRock]: { name: "Radioactive Rock", color: "#9dff2f" },
   [TILE_TYPES.sand]: { name: "Sand", color: "#d4b24a" },
   [TILE_TYPES.steelSand]: { name: "Steel Sand", color: "#7fc9ff" },
-  [TILE_TYPES.magma]: { name: "Magma", color: "#6a1b08" }
+  [TILE_TYPES.magma]: { name: "Magma", color: "#6a1b08" },
+  [TILE_TYPES.liveCrystalBlue]: { name: "Blue Living Crystal", color: "#2e63ff" },
+  [TILE_TYPES.liveCrystalWhite]: { name: "White Living Crystal", color: "#fff2a8" },
+  [TILE_TYPES.liveCrystalPink]: { name: "Purple Living Crystal", color: "#a85cff" },
+  [TILE_TYPES.liveCrystalRed]: { name: "Red Living Crystal", color: "#ff3f52" },
+  [TILE_TYPES.liveCrystalCyan]: { name: "Cyan Living Crystal", color: "#56f0ff" },
+  [TILE_TYPES.hypnoRock]: { name: "Hypno Rock", color: "#15203a" },
+  [TILE_TYPES.liveCrystalRainbow]: { name: "Rainbow Living Crystal", color: "#ffcf5a" }
 };
 
 export const FACING_ROTATIONS = new Map([
@@ -234,3 +254,5 @@ export const FACING_ROTATIONS = new Map([
   ["0,1", Math.PI],
   ["-1,0", -Math.PI / 2]
 ]);
+
+

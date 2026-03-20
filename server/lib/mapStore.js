@@ -148,6 +148,52 @@ function generateInitialMap(setTile) {
   fillRect(setTile, 21, 4, 1, 1, TILE_TYPES.sand);
   fillRect(setTile, 22, 4, 1, 1, TILE_TYPES.steelSand);
   fillRect(setTile, 23, 4, 1, 1, TILE_TYPES.magma);
+  fillRect(setTile, 24, 4, 1, 1, TILE_TYPES.liveCrystalBlue);
+  fillRect(setTile, 25, 4, 1, 1, TILE_TYPES.liveCrystalWhite);
+  fillRect(setTile, 25, 3, 1, 1, TILE_TYPES.magma);
+  fillRect(setTile, 26, 4, 1, 1, TILE_TYPES.liveCrystalPink);
+  fillRect(setTile, 27, 4, 1, 1, TILE_TYPES.liveCrystalRed);
+  fillRect(setTile, 27, 3, 1, 1, TILE_TYPES.blackRock);
+  fillRect(setTile, 28, 4, 1, 1, TILE_TYPES.liveCrystalCyan);
+  fillRect(setTile, 29, 4, 1, 1, TILE_TYPES.hypnoRock);
+  fillRect(setTile, 30, 4, 1, 1, TILE_TYPES.liveCrystalRainbow);
+  fillRect(setTile, 30, 3, 1, 1, TILE_TYPES.rock);
+
+  fillRect(setTile, 8, 44, 1, 1, TILE_TYPES.liveCrystalBlue);
+  fillRect(setTile, 12, 44, 1, 1, TILE_TYPES.liveCrystalBlue);
+  fillRect(setTile, 16, 44, 1, 1, TILE_TYPES.liveCrystalBlue);
+
+  fillRect(setTile, 22, 44, 1, 1, TILE_TYPES.liveCrystalWhite);
+  fillRect(setTile, 22, 43, 1, 1, TILE_TYPES.magma);
+  fillRect(setTile, 26, 44, 1, 1, TILE_TYPES.liveCrystalWhite);
+  fillRect(setTile, 26, 43, 1, 1, TILE_TYPES.magma);
+  fillRect(setTile, 30, 44, 1, 1, TILE_TYPES.liveCrystalWhite);
+  fillRect(setTile, 30, 43, 1, 1, TILE_TYPES.magma);
+
+  fillRect(setTile, 36, 44, 1, 1, TILE_TYPES.liveCrystalPink);
+  fillRect(setTile, 40, 44, 1, 1, TILE_TYPES.liveCrystalPink);
+  fillRect(setTile, 44, 44, 1, 1, TILE_TYPES.liveCrystalPink);
+
+  fillRect(setTile, 50, 44, 1, 1, TILE_TYPES.liveCrystalRed);
+  fillRect(setTile, 49, 43, 1, 1, TILE_TYPES.blackRock);
+  fillRect(setTile, 54, 44, 1, 1, TILE_TYPES.liveCrystalRed);
+  fillRect(setTile, 53, 43, 1, 1, TILE_TYPES.blackRock);
+  fillRect(setTile, 58, 44, 1, 1, TILE_TYPES.liveCrystalRed);
+  fillRect(setTile, 57, 43, 1, 1, TILE_TYPES.blackRock);
+
+  fillRect(setTile, 64, 44, 1, 1, TILE_TYPES.liveCrystalCyan);
+  fillRect(setTile, 68, 44, 1, 1, TILE_TYPES.liveCrystalCyan);
+  fillRect(setTile, 72, 44, 1, 1, TILE_TYPES.liveCrystalCyan);
+
+  fillRect(setTile, 78, 44, 1, 1, TILE_TYPES.hypnoRock);
+  fillRect(setTile, 82, 44, 1, 1, TILE_TYPES.hypnoRock);
+
+  fillRect(setTile, 88, 44, 1, 1, TILE_TYPES.liveCrystalRainbow);
+  fillRect(setTile, 88, 43, 1, 1, TILE_TYPES.rock);
+  fillRect(setTile, 92, 44, 1, 1, TILE_TYPES.liveCrystalRainbow);
+  fillRect(setTile, 92, 43, 1, 1, TILE_TYPES.acidRock);
+  fillRect(setTile, 96, 44, 1, 1, TILE_TYPES.liveCrystalRainbow);
+  fillRect(setTile, 96, 43, 1, 1, TILE_TYPES.reinforcedRock);
 
   const patches = [
     { x: 18, y: 6, w: 6, h: 4, type: TILE_TYPES.crystalGreen },
@@ -338,6 +384,8 @@ module.exports = {
   createMapStore,
   encodeChunk
 };
+
+
 
 
 

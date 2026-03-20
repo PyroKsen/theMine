@@ -165,9 +165,9 @@ export function useBuildingUi({
       if (building.type === "respawn" && building.center) {
         if (building.center.x === player.tx && building.center.y === player.ty) {
           const owner = building.owner || "";
-          if ((building.inactive && owner === me) || owner === me) {
-            nextRespawn = building;
-          }
+          if ((building.inactive && owner === me) || !building.inactive) {
+              nextRespawn = building;
+            }
         }
       }
 
@@ -572,3 +572,7 @@ export function useBuildingUi({
     forceDeath
   };
 }
+
+
+
+

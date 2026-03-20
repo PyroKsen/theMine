@@ -41,6 +41,12 @@ function createBombManager({ mapStore, players, broadcast, applyDamageToPlayer }
       type === TILE_TYPES.sand ||
       type === TILE_TYPES.steelSand ||
       type === TILE_TYPES.magma ||
+      type === TILE_TYPES.liveCrystalBlue ||
+      type === TILE_TYPES.liveCrystalWhite ||
+      type === TILE_TYPES.liveCrystalPink ||
+      type === TILE_TYPES.liveCrystalRed ||
+      type === TILE_TYPES.liveCrystalCyan ||
+      type === TILE_TYPES.liveCrystalRainbow ||
       type === TILE_TYPES.crystalGreen ||
       type === TILE_TYPES.crystalBlue ||
       type === TILE_TYPES.crystalWhite ||
@@ -161,6 +167,8 @@ function createBombManager({ mapStore, players, broadcast, applyDamageToPlayer }
 module.exports = {
   createBombManager
 };
+
+
 
 
 

@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useEffect, useRef, useState } from "react";
+import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 import {
   BASE_MAX_DEPTH_TILES,
   DEFAULT_MAP,
@@ -61,6 +61,7 @@ export default function GameView({ token, onAuthExpired }) {
   const mapWrapRef = useRef(null);
   const mapCanvasRef = useRef(null);
   const mapDrawRafRef = useRef(null);
+  const [mapWrapEl, setMapWrapEl] = useState(null);
   const mapOpenRef = useRef(false);
   const dropOpenRef = useRef(false);
   const ownedBuildingsOpenRef = useRef(false);
@@ -93,6 +94,7 @@ export default function GameView({ token, onAuthExpired }) {
     playerId: null
   });
   const mapHoverRef = useRef({ x: null, y: null, inside: false });
+  const lastKnownRespawnCoordsRef = useRef({ x: 1, y: 1 });
   const [status, setStatus] = useState("connecting");
   const [playerCount, setPlayerCount] = useState(0);
   const [coords, setCoords] = useState({ x: 0, y: 0 });
@@ -236,12 +238,14 @@ export default function GameView({ token, onAuthExpired }) {
     slotCandidateSkill,
     slotSkills,
     visibleSkills
-  } = useSkillUi({
+    } = useSkillUi({
     skillConfig,
     skillSlots,
     skills,
     wallet
-  });  const statusLabel =
+  });
+
+  const statusLabel =
     status === "connecting"
       ? "Connecting"
       : status === "online"
@@ -256,14 +260,17 @@ export default function GameView({ token, onAuthExpired }) {
   const selectedRespawnBuilding = respawnBuildingId
     ? buildingsRef.current.find((building) => building.id === respawnBuildingId) || null
     : null;
-  const respawnCoords = selectedRespawnBuilding?.center
-    ? {
-        x: selectedRespawnBuilding.center.x,
-        y: selectedRespawnBuilding.center.y
-      }
+  if (selectedRespawnBuilding?.center) {
+    lastKnownRespawnCoordsRef.current = {
+      x: selectedRespawnBuilding.center.x,
+      y: selectedRespawnBuilding.center.y
+    };
+  } else if (!respawnBuildingId) {
+    lastKnownRespawnCoordsRef.current = { x: 1, y: 1 };
+  }
+  const respawnCoords = respawnBuildingId
+    ? lastKnownRespawnCoordsRef.current
     : { x: 1, y: 1 };
-  const maxDepth =
-    BASE_MAX_DEPTH_TILES + (Number(skills.depth?.level || 0) * DEPTH_PER_LEVEL);
 
   function getLoadedTileType(tx, ty) {
     const { w, h, chunk, tiles } = mapDataRef.current;
@@ -306,6 +313,9 @@ export default function GameView({ token, onAuthExpired }) {
     const display = TILE_DISPLAY[type] || { name: `Tile ${type}`, color: "#253140" };
     return { ...display, coords: { x: tx, y: ty }, hp: getTrackedTileHp(tx, ty, type) };
   })();
+
+  const maxDepth =
+    BASE_MAX_DEPTH_TILES + (Number(skills.depth?.level || 0) * DEPTH_PER_LEVEL);
 
   const isOverDepth = coords.y > maxDepth;
 
@@ -359,6 +369,11 @@ export default function GameView({ token, onAuthExpired }) {
       requestMapChunks(socket, pending);
     }
   }
+
+  const handleMapWrapRef = useCallback((node) => {
+    mapWrapRef.current = node;
+    setMapWrapEl(node);
+  }, []);
 
   function requestMapDraw() {
     if (!mapOpenRef.current) return;
@@ -475,9 +490,7 @@ export default function GameView({ token, onAuthExpired }) {
     return () => window.removeEventListener("resize", handleResize);
   }, [mapOpen]);
   useEffect(() => {
-    if (!mapOpen) return undefined;
-    const wrap = mapWrapRef.current;
-    if (!wrap) return undefined;
+    if (!mapOpen || !mapWrapEl) return undefined;
 
     const handleWheel = (event) => {
       event.preventDefault();
@@ -485,9 +498,21 @@ export default function GameView({ token, onAuthExpired }) {
       zoomMapAt(event.clientX, event.clientY, factor);
     };
 
-    wrap.addEventListener("wheel", handleWheel, { passive: false });
-    return () => wrap.removeEventListener("wheel", handleWheel);
-  }, [mapOpen]);
+    mapWrapEl.addEventListener("wheel", handleWheel, { passive: false });
+    requestMapDraw();
+    return () => mapWrapEl.removeEventListener("wheel", handleWheel);
+  }, [mapOpen, mapWrapEl]);
+
+  useEffect(() => {
+    const preventBrowserZoom = (event) => {
+      if (event.ctrlKey) {
+        event.preventDefault();
+      }
+    };
+
+    window.addEventListener("wheel", preventBrowserZoom, { passive: false });
+    return () => window.removeEventListener("wheel", preventBrowserZoom);
+  }, []);
 
   useEffect(() => {
     if (!token) return undefined;
@@ -991,7 +1016,7 @@ export default function GameView({ token, onAuthExpired }) {
           <WorldMapOverlay
             mapOpen={mapOpen}
             mapPanning={mapPanning}
-            mapWrapRef={mapWrapRef}
+            mapWrapRef={handleMapWrapRef}
             mapCanvasRef={mapCanvasRef}
             handleMapMouseDown={handleMapMouseDown}
             handleMapMouseMove={handleMapMouseMove}
@@ -1005,3 +1030,9 @@ export default function GameView({ token, onAuthExpired }) {
     </div>
   );
 }
+
+
+
+
+
+

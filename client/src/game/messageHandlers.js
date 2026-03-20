@@ -110,10 +110,14 @@ export function createSocketMessageHandler({
     );
   }
 
-  function refreshChunkIfNeeded(cx, cy) {
+  function markChunkStale(cx, cy) {
     const key = chunkKey(cx, cy);
     staleChunksRef.current.add(key);
     loadedChunksRef.current.delete(key);
+  }
+
+  function refreshChunkIfNeeded(cx, cy) {
+    markChunkStale(cx, cy);
     if (typeof requestChunks === "function") {
       requestChunks([{ cx, cy }], { force: true });
     }
@@ -233,7 +237,10 @@ export function createSocketMessageHandler({
       const hasChunk = mapDataRef.current.tiles.has(key);
 
       tileHpRef.current.delete(`${msg.x},${msg.y}`);
-      if (hasChunk) {
+      const inView = isTileWithinView(msg.x, msg.y);
+      if (!inView) {
+        markChunkStale(cx, cy);
+      } else if (hasChunk) {
         const updated = setChunkValue(
           mapDataRef.current.tiles,
           msg.x,
@@ -259,7 +266,12 @@ export function createSocketMessageHandler({
           const cx = Math.floor(Number(tile.x) / chunkSize);
           const cy = Math.floor(Number(tile.y) / chunkSize);
           const key = chunkKey(cx, cy);
-          if (!mapDataRef.current.buildings.has(key) && !isTileWithinView(tile.x, tile.y)) {
+          const inView = isTileWithinView(tile.x, tile.y);
+          if (!inView) {
+            markChunkStale(cx, cy);
+            continue;
+          }
+          if (!mapDataRef.current.buildings.has(key)) {
             refreshChunkIfNeeded(cx, cy);
             continue;
           }
@@ -304,6 +316,11 @@ export function createSocketMessageHandler({
           const chunkSize = mapDataRef.current.chunk || DEFAULT_MAP.chunk;
           const cx = Math.floor(Number(tile.x) / chunkSize);
           const cy = Math.floor(Number(tile.y) / chunkSize);
+          const inView = isTileWithinView(tile.x, tile.y);
+          if (!inView) {
+            markChunkStale(cx, cy);
+            continue;
+          }
           const updated = setChunkValue(
             mapDataRef.current.buildings,
             tile.x,
@@ -554,6 +571,9 @@ export function createSocketMessageHandler({
     }
   };
 }
+
+
+
 
 
 

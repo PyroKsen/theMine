@@ -33,9 +33,11 @@ function attachRealtimeServer({
     CHUNK_SIZE,
     TELEPORT_PRICE,
     TELEPORT_RANGE,
+    LIVE_CRYSTAL_GROWTH_MS,
     TILE_TYPES,
     TILE_HP,
-    SKILL_DEFS
+    SKILL_DEFS,
+    ITEM_DEFS
   } = config;
   const {
     stmtGetUser,
@@ -163,6 +165,196 @@ function attachRealtimeServer({
   const SAND_FALL_DAMAGE = 3;
   const STEEL_SAND_FALL_DAMAGE = 10;
   const MAGMA_FALL_DAMAGE = 60;
+  const LIVE_CRYSTAL_FIXED_DAMAGE = 1;
+  const GEOPAK_EMPTY_ID = "geopak_empty";
+  const LIVE_CRYSTAL_ITEM_BY_TILE = new Map([
+    [TILE_TYPES.liveCrystalBlue, "geopak_blue"],
+    [TILE_TYPES.liveCrystalWhite, "geopak_white"],
+    [TILE_TYPES.liveCrystalPink, "geopak_pink"],
+    [TILE_TYPES.liveCrystalRed, "geopak_red"],
+    [TILE_TYPES.liveCrystalCyan, "geopak_cyan"],
+    [TILE_TYPES.liveCrystalRainbow, "geopak_rainbow"],
+    [TILE_TYPES.hypnoRock, "geopak_hypno"]
+  ]);
+  const LIVE_CRYSTAL_TILE_BY_ITEM = new Map(
+    Array.from(LIVE_CRYSTAL_ITEM_BY_TILE.entries()).map(([tileType, itemId]) => [itemId, tileType])
+  );
+
+  function isLivingCrystal(type) {
+    return (
+      type === TILE_TYPES.liveCrystalBlue ||
+      type === TILE_TYPES.liveCrystalWhite ||
+      type === TILE_TYPES.liveCrystalPink ||
+      type === TILE_TYPES.liveCrystalRed ||
+      type === TILE_TYPES.liveCrystalCyan ||
+      type === TILE_TYPES.liveCrystalRainbow
+    );
+  }
+
+  function isLivingFamilyTile(type) {
+    return isLivingCrystal(type) || type === TILE_TYPES.hypnoRock;
+  }
+
+  function isRainbowCopyableTile(type) {
+    if (type == null) return false;
+    if (type === TILE_TYPES.empty) return false;
+    if (type === TILE_TYPES.dropBox) return false;
+    if (type === TILE_TYPES.redRock) return false;
+    if (type === TILE_TYPES.blackRock) return false;
+    if (type === TILE_TYPES.hypnoRock) return false;
+    if (isLivingFamilyTile(type)) return false;
+    if (
+      type === TILE_TYPES.buildGreen ||
+      type === TILE_TYPES.buildYellow ||
+      type === TILE_TYPES.buildRed
+    ) {
+      return false;
+    }
+    return true;
+  }
+
+  function setTileAndBroadcast(x, y, type) {
+    setTile(x, y, type);
+    if (TILE_HP.has(type)) {
+      setTileHp(x, y, TILE_HP.get(type));
+    } else {
+      deleteTileHp(x, y);
+    }
+    broadcast({ t: "tile", x, y, value: type });
+  }
+
+
+  function sendPlayerItems(player) {
+    sendToPlayer(player, { t: "items", items: buildItemsPayload(player.items) });
+  }
+
+  function getFrontTilePosition(player) {
+    const fx = Math.sign(Number(player?.facingX) || 0);
+    const fy = Math.sign(Number(player?.facingY) || 0);
+    return {
+      x: player.tx + fx,
+      y: player.ty + fy
+    };
+  }
+
+  function canGenerateAt(x, y) {
+    if (x < 0 || x >= MAP_W || y < 0 || y >= MAP_H) return false;
+    if (getTile(x, y) !== TILE_TYPES.empty) return false;
+    if (getBuilding(x, y) !== 0) return false;
+    if (bombByTile.has(`${x},${y}`)) return false;
+    return true;
+  }
+
+  const liveCrystalGrowthDue = new Map();
+
+  function setLiveCrystalDue(key, dueAt) {
+    liveCrystalGrowthDue.set(key, Math.max(Date.now(), Number(dueAt) || 0));
+  }
+
+  function ensureLiveCrystalGrowthTimers(now = Date.now()) {
+    const seen = new Set();
+    for (let y = 0; y < MAP_H; y += 1) {
+      for (let x = 0; x < MAP_W; x += 1) {
+        const type = getTile(x, y);
+        if (!isLivingCrystal(type)) continue;
+        const key = `${x},${y}`;
+        seen.add(key);
+        if (!liveCrystalGrowthDue.has(key)) {
+          liveCrystalGrowthDue.set(key, now + LIVE_CRYSTAL_GROWTH_MS);
+        }
+      }
+    }
+    for (const key of Array.from(liveCrystalGrowthDue.keys())) {
+      if (!seen.has(key)) {
+        liveCrystalGrowthDue.delete(key);
+      }
+    }
+  }
+
+  function tryGenerateTile(x, y, type) {
+    if (!canGenerateAt(x, y)) return false;
+    setTileAndBroadcast(x, y, type);
+    return true;
+  }
+
+  function runLiveCrystalGrowthStep() {
+    const now = Date.now();
+    ensureLiveCrystalGrowthTimers(now);
+    const dueEntries = Array.from(liveCrystalGrowthDue.entries())
+      .filter(([, dueAt]) => dueAt <= now)
+      .sort((a, b) => a[1] - b[1]);
+
+    for (const [key] of dueEntries) {
+      const [x, y] = key.split(",").map((value) => Number(value));
+      if (!Number.isInteger(x) || !Number.isInteger(y)) {
+        liveCrystalGrowthDue.delete(key);
+        continue;
+      }
+      const type = getTile(x, y);
+      if (!isLivingCrystal(type)) {
+        liveCrystalGrowthDue.delete(key);
+        continue;
+      }
+
+      if (type === TILE_TYPES.liveCrystalBlue) {
+        const directions = [
+          { x: 0, y: -1 },
+          { x: 1, y: 0 },
+          { x: 0, y: 1 },
+          { x: -1, y: 0 }
+        ].sort(() => Math.random() - 0.5);
+        const destination = directions.find((dir) => canGenerateAt(x + dir.x, y + dir.y));
+        if (destination) {
+          setTileAndBroadcast(x, y, TILE_TYPES.crystalBlue);
+          setTileAndBroadcast(x + destination.x, y + destination.y, TILE_TYPES.liveCrystalBlue);
+          liveCrystalGrowthDue.delete(key);
+          setLiveCrystalDue(`${x + destination.x},${y + destination.y}`, now + LIVE_CRYSTAL_GROWTH_MS);
+          continue;
+        }
+      } else if (type === TILE_TYPES.liveCrystalWhite) {
+        if (getTile(x, y - 1) === TILE_TYPES.magma) {
+          tryGenerateTile(x, y + 1, TILE_TYPES.crystalWhite);
+          tryGenerateTile(x - 1, y, TILE_TYPES.crystalWhite);
+          tryGenerateTile(x + 1, y, TILE_TYPES.crystalWhite);
+        }
+      } else if (type === TILE_TYPES.liveCrystalPink) {
+        tryGenerateTile(x, y - 1, TILE_TYPES.crystalPink);
+        tryGenerateTile(x + 1, y, TILE_TYPES.crystalPink);
+        tryGenerateTile(x, y + 1, TILE_TYPES.crystalPink);
+        tryGenerateTile(x - 1, y, TILE_TYPES.crystalPink);
+      } else if (type === TILE_TYPES.liveCrystalRed) {
+        let hasBlackRockNearby = false;
+        for (let ny = y - 1; ny <= y + 1 && !hasBlackRockNearby; ny += 1) {
+          for (let nx = x - 1; nx <= x + 1; nx += 1) {
+            if (getTile(nx, ny) === TILE_TYPES.blackRock) {
+              hasBlackRockNearby = true;
+              break;
+            }
+          }
+        }
+        if (hasBlackRockNearby) {
+          tryGenerateTile(x, y - 1, TILE_TYPES.crystalRed);
+          tryGenerateTile(x + 1, y, TILE_TYPES.crystalRed);
+          tryGenerateTile(x, y + 1, TILE_TYPES.crystalRed);
+          tryGenerateTile(x - 1, y, TILE_TYPES.crystalRed);
+        }
+      } else if (type === TILE_TYPES.liveCrystalCyan) {
+        tryGenerateTile(x, y - 1, TILE_TYPES.crystalCyan);
+        tryGenerateTile(x + 1, y, TILE_TYPES.crystalCyan);
+        tryGenerateTile(x, y + 1, TILE_TYPES.crystalCyan);
+        tryGenerateTile(x - 1, y, TILE_TYPES.crystalCyan);
+      } else if (type === TILE_TYPES.liveCrystalRainbow) {
+        const sourceType = getTile(x, y - 1);
+        if (isRainbowCopyableTile(sourceType)) {
+          tryGenerateTile(x - 1, y, sourceType);
+          tryGenerateTile(x + 1, y, sourceType);
+          tryGenerateTile(x, y + 1, sourceType);
+        }
+      }
+
+      setLiveCrystalDue(key, now + LIVE_CRYSTAL_GROWTH_MS);
+    }
+  }
 
   function isFallingTile(type) {
     return (
@@ -314,19 +506,9 @@ function attachRealtimeServer({
       exploredChunks: parseExplored(saved?.explored_chunks),
       exploredDirty: false,
       exploreBounds: null,
-      items: {
-        medkit: saved?.item_medkit ?? 0,
-        bomb: saved?.item_bomb ?? 0,
-        plasmabomb: saved?.item_plasmabomb ?? 0,
-        electrobomb: saved?.item_electrobomb ?? 0,
-        storage: saved?.item_storage ?? 0,
-        shop: saved?.item_shop ?? 0,
-        respawn: saved?.item_respawn ?? 0,
-        upgrade: saved?.item_upgrade ?? 0,
-        teleport: saved?.item_teleport ?? 0,
-        turret: saved?.item_turret ?? 0,
-        clan_hall: saved?.item_clan_hall ?? 0
-      }
+      items: Object.fromEntries(
+        ITEM_DEFS.map((item) => [item.id, saved?.[item.column] ?? 0])
+      )
     };
 
     updateExplored(player);
@@ -429,10 +611,39 @@ function attachRealtimeServer({
         if (!itemUpdateStmts.has(id)) return;
         const current = player.items[id] ?? 0;
         if (current <= 0) return;
-        setItemCount(player, id, current - 1);
-        sendToPlayer(player, { t: "items", items: buildItemsPayload(player.items) });
+
         if (id === "medkit") {
+          setItemCount(player, id, current - 1);
+          sendPlayerItems(player);
           applyHealToPlayer(player, 250);
+          return;
+        }
+
+        const front = getFrontTilePosition(player);
+        const frontType = getTile(front.x, front.y);
+
+        if (id === GEOPAK_EMPTY_ID) {
+          const packedItemId = LIVE_CRYSTAL_ITEM_BY_TILE.get(frontType);
+          if (!packedItemId) return;
+          if (!itemUpdateStmts.has(packedItemId)) return;
+          setTile(front.x, front.y, TILE_TYPES.empty);
+          deleteTileHp(front.x, front.y);
+          liveCrystalGrowthDue.delete(`${front.x},${front.y}`);
+          broadcast({ t: "tile", x: front.x, y: front.y, value: TILE_TYPES.empty });
+          setItemCount(player, GEOPAK_EMPTY_ID, current - 1);
+          setItemCount(player, packedItemId, (player.items[packedItemId] ?? 0) + 1);
+          sendPlayerItems(player);
+          return;
+        }
+
+        const geopakTileType = LIVE_CRYSTAL_TILE_BY_ITEM.get(id);
+        if (geopakTileType != null) {
+          if (!canGenerateAt(front.x, front.y)) return;
+          setTileAndBroadcast(front.x, front.y, geopakTileType);
+          setLiveCrystalDue(`${front.x},${front.y}`, Date.now() + LIVE_CRYSTAL_GROWTH_MS);
+          setItemCount(player, id, current - 1);
+          setItemCount(player, GEOPAK_EMPTY_ID, (player.items[GEOPAK_EMPTY_ID] ?? 0) + 1);
+          sendPlayerItems(player);
         }
       }
 
@@ -784,6 +995,8 @@ function attachRealtimeServer({
   });
 
   setInterval(runFallingTilesStep, FALLING_TILE_STEP_MS);
+  ensureLiveCrystalGrowthTimers(Date.now());
+  setInterval(runLiveCrystalGrowthStep, LIVE_CRYSTAL_GROWTH_MS);
 
   const tickIntervalMs = 1000 / TICK_RATE;
   setInterval(() => {
@@ -846,6 +1059,9 @@ function attachRealtimeServer({
               type === TILE_TYPES.buildRed;
             const isDropBox = type === TILE_TYPES.dropBox;
             let damage = getMiningDamage(player);
+            if (isLivingCrystal(type)) {
+              damage = LIVE_CRYSTAL_FIXED_DAMAGE;
+            }
             let hazardDamageMin = 0;
             let hazardDamageMax = 0;
             if (type === TILE_TYPES.acidRock) {
@@ -967,13 +1183,6 @@ function attachRealtimeServer({
     }
 
     destroyExpiredBuildings(Date.now());
-    for (const player of players.values()) {
-      if (!player.respawnBuildingId) continue;
-      if (getBuildingById(player.respawnBuildingId)) continue;
-      player.respawnBuildingId = null;
-      stmtUpdateRespawnBuildingId.run(null, player.username);
-      sendToPlayer(player, { t: "respawn_selection", id: null });
-    }
 
     broadcast({
       t: "state",
@@ -1008,6 +1217,9 @@ function attachRealtimeServer({
 module.exports = {
   attachRealtimeServer
 };
+
+
+
 
 
 

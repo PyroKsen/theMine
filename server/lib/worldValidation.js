@@ -8,11 +8,10 @@ function isValidRespawnSelection(username, building) {
   return Boolean(
     building &&
       building.type === "respawn" &&
-      building.owner === username &&
       !building.inactive &&
       Number(building.hp || 0) > 0 &&
-      Number.isFinite(Number(building.center?.x)) &&
-      Number.isFinite(Number(building.center?.y))
+      Number.isFinite(Number(building.entrance?.x)) &&
+      Number.isFinite(Number(building.entrance?.y))
   );
 }
 
@@ -86,3 +85,6 @@ function validateAndRepairWorldState({
 module.exports = {
   validateAndRepairWorldState
 };
+
+
+

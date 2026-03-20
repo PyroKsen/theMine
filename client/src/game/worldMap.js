@@ -13,7 +13,17 @@ function isBuiltBlockTile(type) {
   );
 }
 
-function darkenHexColor(hex, factor = 0.72) {
+
+function isLivingCrystalTile(type) {
+  return (
+    type === TILE_TYPES.liveCrystalBlue ||
+    type === TILE_TYPES.liveCrystalWhite ||
+    type === TILE_TYPES.liveCrystalPink ||
+    type === TILE_TYPES.liveCrystalRed ||
+    type === TILE_TYPES.liveCrystalCyan ||
+    type === TILE_TYPES.liveCrystalRainbow
+  );
+}function darkenHexColor(hex, factor = 0.72) {
   const safe = Math.max(0, Math.min(1, factor));
   const value = String(hex || "#000000").replace("#", "");
   const padded = value.length === 3
@@ -87,6 +97,13 @@ export function drawWorldMapCanvas({
           if (type === TILE_TYPES.sand) color = "#d4b24a";
           if (type === TILE_TYPES.steelSand) color = "#7fc9ff";
           if (type === TILE_TYPES.magma) color = "#6a1b08";
+          if (type === TILE_TYPES.liveCrystalBlue) color = "#2e63ff";
+          if (type === TILE_TYPES.liveCrystalWhite) color = "#fff2a8";
+          if (type === TILE_TYPES.liveCrystalPink) color = "#a85cff";
+          if (type === TILE_TYPES.liveCrystalRed) color = "#ff3f52";
+          if (type === TILE_TYPES.liveCrystalCyan) color = "#56f0ff";
+          if (type === TILE_TYPES.hypnoRock) color = "#15203a";
+          if (type === TILE_TYPES.liveCrystalRainbow) color = "#ffcf5a";
           if (type === TILE_TYPES.buildGreen) color = "#3bd97a";
           if (type === TILE_TYPES.buildYellow) color = "#f9c74f";
           if (type === TILE_TYPES.buildRed) color = "#ff6b6b";
@@ -231,6 +248,9 @@ export function getMapHoverPosition({ wrap, mapData, mapView, clientX, clientY }
     inside: true
   };
 }
+
+
+
 
 
 

@@ -235,7 +235,7 @@ function runBuildingLayerRepairPersistenceTest() {
   try {
     world = buildWorld(dataDir);
     const player = { username: "host", facingX: 0, facingY: -1 };
-    assert.ok(world.buildingManager.placeRespawn(player, 44, 44));
+    assert.ok(world.buildingManager.placeRespawn(player, 140, 140));
     flushAll(world);
 
     world.mapStore.replaceBuildingLayer(new Uint8Array(MAP_W * MAP_H));
@@ -362,14 +362,14 @@ function runDbLegacyAdoptionTest() {
   let dbHandle = null;
   try {
     dbHandle = createDb(dataDir);
-    assert.strictEqual(dbHandle.migrationResult.toVersion, 5);
+    assert.strictEqual(dbHandle.migrationResult.toVersion, 6);
     dbHandle.db.pragma("user_version = 0");
     dbHandle.db.close();
 
     dbHandle = createDb(dataDir);
     assert.strictEqual(dbHandle.migrationResult.appliedMigrations.length, 0);
-    assert.strictEqual(dbHandle.migrationResult.adoptedLegacyVersion, 5);
-    assert.strictEqual(dbHandle.db.pragma("user_version", { simple: true }), 5);
+    assert.strictEqual(dbHandle.migrationResult.adoptedLegacyVersion, 6);
+    assert.strictEqual(dbHandle.db.pragma("user_version", { simple: true }), 6);
   } finally {
     try {
       dbHandle?.db?.close?.();

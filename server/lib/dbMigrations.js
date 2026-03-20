@@ -1,6 +1,6 @@
 const { ITEM_DEFS, SKILL_DEFS } = require("./config");
 
-const DB_SCHEMA_VERSION = 5;
+const DB_SCHEMA_VERSION = 6;
 
 const USER_PROGRESS_COLUMNS = Object.freeze([
   ["last_tx", "INTEGER"],
@@ -131,6 +131,20 @@ function migrateToV5(db) {
   );
 }
 
+function migrateToV6(db) {
+  migrateToV5(db);
+  const columns = getTableColumns(db, "users");
+  for (const item of ITEM_DEFS) {
+    addColumnIfMissing(
+      db,
+      "users",
+      columns,
+      item.column,
+      "INTEGER NOT NULL DEFAULT 0"
+    );
+  }
+}
+
 const DB_MIGRATIONS = Object.freeze([
   {
     version: 1,
@@ -156,6 +170,11 @@ const DB_MIGRATIONS = Object.freeze([
     version: 5,
     description: "add SQLite-backed building and drop box tables",
     up: migrateToV5
+  },
+  {
+    version: 6,
+    description: "add geopak inventory columns",
+    up: migrateToV6
   }
 ]);
 
@@ -187,6 +206,11 @@ function inferLegacyDbVersion(db) {
 
   if (tableExists(db, "buildings") && tableExists(db, "drop_boxes")) {
     version = 5;
+  }
+
+  const hasAllCurrentItemColumns = ITEM_DEFS.every((item) => userColumns.has(item.column));
+  if (version >= 5 && hasAllCurrentItemColumns) {
+    version = 6;
   }
 
   return version;

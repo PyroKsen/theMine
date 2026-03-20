@@ -11,6 +11,9 @@ const {
   MINE_COOLDOWN_MS,
   CHAT_MAX_LEN,
   CRYSTAL_PRICES,
+  TELEPORT_PRICE,
+  TELEPORT_RANGE,
+  LIVE_CRYSTAL_GROWTH_MS,
   BUILDING_TYPES,
   MAP_W,
   MAP_H,
@@ -21,7 +24,8 @@ const {
   BOMB_ITEMS,
   BUILDING_ITEMS,
   TILE_HP,
-  SKILL_DEFS
+  SKILL_DEFS,
+  ITEM_DEFS
 } = require("./lib/config");
 const {
   getSkillConfig,
@@ -276,10 +280,10 @@ attachRealtimeServer({
   sessions,
   players,
   config: {
-      BASE_HP,
-      BASE_SPAWN_TX,
-      BASE_SPAWN_TY,
-      DEPTH_OVERLOAD_INTERVAL_MS,
+    BASE_HP,
+    BASE_SPAWN_TX,
+    BASE_SPAWN_TY,
+    DEPTH_OVERLOAD_INTERVAL_MS,
     TICK_RATE,
     MINE_COOLDOWN_MS,
     CHAT_MAX_LEN,
@@ -290,9 +294,13 @@ attachRealtimeServer({
     MAP_H,
     TILE_SIZE,
     CHUNK_SIZE,
+    TELEPORT_PRICE,
+    TELEPORT_RANGE,
+    LIVE_CRYSTAL_GROWTH_MS,
     TILE_TYPES,
     TILE_HP,
-    SKILL_DEFS
+    SKILL_DEFS,
+    ITEM_DEFS
   },
   db: {
     stmtGetUser,

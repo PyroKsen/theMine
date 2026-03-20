@@ -19,6 +19,7 @@ const BUILDING_MAX_HP = 1000;
 const BUILDING_DESTROY_TIMEOUT_MS = 5 * 60 * 1000;
 const TELEPORT_PRICE = 100;
 const TELEPORT_RANGE = 1000;
+const LIVE_CRYSTAL_GROWTH_MS = 2 * 60 * 1000;
 
 const CRYSTAL_PRICES = {
   green: 8,
@@ -68,7 +69,14 @@ const TILE_TYPES = {
   radioactiveRock: 22,
   sand: 23,
   steelSand: 24,
-  magma: 25
+  magma: 25,
+  liveCrystalBlue: 26,
+  liveCrystalWhite: 27,
+  liveCrystalPink: 28,
+  liveCrystalRed: 29,
+  liveCrystalCyan: 30,
+  hypnoRock: 31,
+  liveCrystalRainbow: 32
 };
 
 const CRYSTAL_TILE_TO_COLOR = new Map([
@@ -91,7 +99,15 @@ const ITEM_DEFS = [
   { id: "upgrade", name: "Upgrade", column: "item_upgrade" },
   { id: "teleport", name: "Teleport", column: "item_teleport" },
   { id: "turret", name: "Turret", column: "item_turret" },
-  { id: "clan_hall", name: "Clan Hall", column: "item_clan_hall" }
+  { id: "clan_hall", name: "Clan Hall", column: "item_clan_hall" },
+  { id: "geopak_empty", name: "Geopak", column: "item_geopak_empty" },
+  { id: "geopak_blue", name: "Geopak: Blue Living", column: "item_geopak_blue" },
+  { id: "geopak_white", name: "Geopak: White Living", column: "item_geopak_white" },
+  { id: "geopak_pink", name: "Geopak: Pink Living", column: "item_geopak_pink" },
+  { id: "geopak_red", name: "Geopak: Red Living", column: "item_geopak_red" },
+  { id: "geopak_cyan", name: "Geopak: Cyan Living", column: "item_geopak_cyan" },
+  { id: "geopak_rainbow", name: "Geopak: Rainbow Living", column: "item_geopak_rainbow" },
+  { id: "geopak_hypno", name: "Geopak: Hypno Rock", column: "item_geopak_hypno" }
 ];
 
 const BOMB_TYPES = {
@@ -147,6 +163,12 @@ const TILE_HP = new Map([
   [TILE_TYPES.sand, 3],
   [TILE_TYPES.steelSand, 10],
   [TILE_TYPES.magma, 5],
+  [TILE_TYPES.liveCrystalBlue, 10],
+  [TILE_TYPES.liveCrystalWhite, 10],
+  [TILE_TYPES.liveCrystalPink, 10],
+  [TILE_TYPES.liveCrystalRed, 10],
+  [TILE_TYPES.liveCrystalCyan, 10],
+  [TILE_TYPES.liveCrystalRainbow, 30],
   [TILE_TYPES.buildGreen, 5],
   [TILE_TYPES.buildYellow, 55],
   [TILE_TYPES.buildRed, 155],
@@ -282,6 +304,7 @@ module.exports = {
   BUILDING_DESTROY_TIMEOUT_MS,
   TELEPORT_PRICE,
   TELEPORT_RANGE,
+  LIVE_CRYSTAL_GROWTH_MS,
   CRYSTAL_PRICES,
   BUILDING_TYPES,
   MAP_W,
@@ -297,6 +320,8 @@ module.exports = {
   TILE_HP,
   SKILL_DEFS
 };
+
+
 
 
 

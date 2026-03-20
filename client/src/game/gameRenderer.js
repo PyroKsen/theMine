@@ -50,6 +50,7 @@ export function createGameRenderer({
   const smokeEmitters = new Map();
   const terrainChunks = new Map();
   const buildingChunks = new Map();
+  let lastLivingPulseStep = -1;
 
   const state = {
     playerId: null,
@@ -97,6 +98,38 @@ export function createGameRenderer({
     return (r << 16) | (g << 8) | b;
   }
 
+
+  function isLivingCrystalTile(type) {
+    return (
+      type === TILE_TYPES.liveCrystalBlue ||
+      type === TILE_TYPES.liveCrystalWhite ||
+      type === TILE_TYPES.liveCrystalPink ||
+      type === TILE_TYPES.liveCrystalRed ||
+      type === TILE_TYPES.liveCrystalCyan ||
+      type === TILE_TYPES.liveCrystalRainbow
+    );
+  }
+
+  function getLivingCrystalPulse() {
+    const cycleMs = 1800;
+    const phase = (performance.now() % cycleMs) / cycleMs;
+    return (Math.sin(phase * Math.PI * 2) + 1) / 2;
+  }
+
+  function drawLivingCrystalTile(graphic, tileX, tileY, size, color, pulse = getLivingCrystalPulse()) {
+    const outerAlpha = 0.84 + pulse * 0.16;
+    const coreColor = darkenColor(color, 0.58);
+    const minInset = size * 0.18;
+    const maxInset = size * 0.3;
+    const inset = Math.max(2, minInset + (1 - pulse) * (maxInset - minInset));
+    graphic.beginFill(color, outerAlpha);
+    graphic.drawRect(tileX, tileY, size, size);
+    graphic.endFill();
+    graphic.beginFill(coreColor, 0.92);
+    graphic.drawRect(tileX + inset, tileY + inset, size - inset * 2, size - inset * 2);
+    graphic.endFill();
+  }
+
   function drawBuiltBlockTile(graphic, tileX, tileY, size, color) {
     const crossColor = darkenColor(color, 0.66);
     const inset = Math.max(2, size * 0.18);
@@ -111,7 +144,13 @@ export function createGameRenderer({
     graphic.lineTo(tileX + inset, tileY + size - inset);
     graphic.lineStyle(0, 0, 0);
   }
+  function setChunkGraphicVisibility(graphic, cx, cy) {
+    if (!graphic) return;
+    graphic.visible = chunkIntersectsView(cx, cy);
+  }
+
   function drawTerrainChunk(cx, cy) {
+    const livingPulse = getLivingCrystalPulse();
     const key = chunkKey(cx, cy);
     const chunk = mapDataRef.current.tiles.get(key);
     if (!chunk || !terrain) return;
@@ -122,6 +161,7 @@ export function createGameRenderer({
       terrain.addChild(graphic);
     }
     graphic.clear();
+    setChunkGraphicVisibility(graphic, cx, cy);
     const { tile } = state.map;
     const chunkSize = state.map.chunk || DEFAULT_MAP.chunk;
     const originX = cx * chunkSize * tile;
@@ -169,6 +209,13 @@ export function createGameRenderer({
         if (type === TILE_TYPES.sand) color = 0xd4b24a;
         if (type === TILE_TYPES.steelSand) color = 0x7fc9ff;
         if (type === TILE_TYPES.magma) color = 0x6a1b08;
+        if (type === TILE_TYPES.liveCrystalBlue) color = 0x2e63ff;
+        if (type === TILE_TYPES.liveCrystalWhite) color = 0xfff2a8;
+        if (type === TILE_TYPES.liveCrystalPink) color = 0xa85cff;
+        if (type === TILE_TYPES.liveCrystalRed) color = 0xff3f52;
+        if (type === TILE_TYPES.liveCrystalCyan) color = 0x56f0ff;
+        if (type === TILE_TYPES.hypnoRock) color = 0x15203a;
+        if (type === TILE_TYPES.liveCrystalRainbow) color = 0xffcf5a;
         if (type === TILE_TYPES.buildGreen) color = 0x3bd97a;
         if (type === TILE_TYPES.buildYellow) color = 0xf9c74f;
         if (type === TILE_TYPES.buildRed) color = 0xff6b6b;
@@ -177,6 +224,8 @@ export function createGameRenderer({
           const tileY = originY + y * tile;
           if (isBuiltBlockTile(type)) {
             drawBuiltBlockTile(graphic, tileX, tileY, tile, color);
+          } else if (isLivingCrystalTile(type)) {
+            drawLivingCrystalTile(graphic, tileX, tileY, tile, color, livingPulse);
           } else {
             graphic.beginFill(color);
             graphic.drawRect(tileX, tileY, tile, tile);
@@ -198,6 +247,7 @@ export function createGameRenderer({
       buildingLayer.addChild(graphic);
     }
     graphic.clear();
+    setChunkGraphicVisibility(graphic, cx, cy);
     const { tile } = state.map;
     const chunkSize = state.map.chunk || DEFAULT_MAP.chunk;
     const originX = cx * chunkSize * tile;
@@ -280,6 +330,28 @@ export function createGameRenderer({
   function drawBuildings() {
     if (!buildingLayer) return;
     clearChunkGraphics(buildingChunks, buildingLayer);
+  }
+
+  function syncChunkVisibility() {
+    for (const [key, graphic] of terrainChunks.entries()) {
+      const [cx, cy] = key.split(",").map((value) => Number(value));
+      if (!Number.isFinite(cx) || !Number.isFinite(cy)) continue;
+      setChunkGraphicVisibility(graphic, cx, cy);
+    }
+    for (const [key, graphic] of buildingChunks.entries()) {
+      const [cx, cy] = key.split(",").map((value) => Number(value));
+      if (!Number.isFinite(cx) || !Number.isFinite(cy)) continue;
+      setChunkGraphicVisibility(graphic, cx, cy);
+    }
+  }
+
+  function redrawVisibleLivingCrystalChunks() {
+    for (const key of terrainChunks.keys()) {
+      const [cx, cy] = key.split(",").map((value) => Number(value));
+      if (!Number.isFinite(cx) || !Number.isFinite(cy)) continue;
+      if (!chunkIntersectsView(cx, cy)) continue;
+      drawTerrainChunk(cx, cy);
+    }
   }
 
   function buildingSmokeAnchor(building) {
@@ -843,12 +915,20 @@ export function createGameRenderer({
         );
         requestChunks(request, { force });
       }
+      syncChunkVisibility();
       updateBuildingWindows();
+    } else {
+      syncChunkVisibility();
     }
   }
 
   function render() {
     const dtMs = app?.ticker?.deltaMS ?? 16;
+    const livingPulseStep = Math.floor(getLivingCrystalPulse() * 10);
+    if (livingPulseStep != lastLivingPulseStep) {
+      lastLivingPulseStep = livingPulseStep;
+      redrawVisibleLivingCrystalChunks();
+    }
     syncBuildingSmokeEmitters();
     for (const emitter of smokeEmitters.values()) {
       emitter.cooldownMs -= dtMs;
@@ -1083,6 +1163,11 @@ export function createGameRenderer({
     updatePlacement
   };
 }
+
+
+
+
+
 
 
 

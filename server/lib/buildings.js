@@ -788,7 +788,7 @@ function createBuildingManager({
   function respawnAtPlayer(player, { allowInactiveOwner = false } = {}) {
     if (!player) return null;
     for (const building of buildings) {
-      if (building.type !== "respawn" || building.owner !== player.username) continue;
+      if (building.type !== "respawn") continue;
       if (canAccessCenterBuilding(player, building, { allowInactiveOwner })) return building;
     }
     return null;
@@ -797,9 +797,8 @@ function createBuildingManager({
   function getRespawnSpawn(player) {
     const building = getBuildingById(player?.respawnBuildingId);
     if (!building || building.type !== "respawn") return null;
-    if (building.owner !== player.username) return null;
-    if (building.inactive || (building.hp ?? 0) <= 0 || !building.center) return null;
-    return { tx: building.center.x, ty: building.center.y, buildingId: building.id };
+    if (building.inactive || (building.hp ?? 0) <= 0 || !building.entrance) return null;
+    return { tx: building.entrance.x, ty: building.entrance.y, buildingId: building.id };
   }
 
   function teleportAtPlayer(player, { allowInactiveOwner = false } = {}) {
@@ -847,3 +846,6 @@ function createBuildingManager({
 module.exports = {
   createBuildingManager
 };
+
+
+

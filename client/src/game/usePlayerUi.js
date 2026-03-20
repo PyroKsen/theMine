@@ -30,7 +30,15 @@ const DEFAULT_ITEMS = [
   { id: "upgrade", name: "Upgrade", count: 0 },
   { id: "teleport", name: "Teleport", count: 0 },
   { id: "turret", name: "Turret", count: 0 },
-  { id: "clan_hall", name: "Clan Hall", count: 0 }
+  { id: "clan_hall", name: "Clan Hall", count: 0 },
+  { id: "geopak_empty", name: "Geopak", count: 0 },
+  { id: "geopak_blue", name: "Geopak: Blue Living", count: 0 },
+  { id: "geopak_white", name: "Geopak: White Living", count: 0 },
+  { id: "geopak_pink", name: "Geopak: Pink Living", count: 0 },
+  { id: "geopak_red", name: "Geopak: Red Living", count: 0 },
+  { id: "geopak_cyan", name: "Geopak: Cyan Living", count: 0 },
+  { id: "geopak_rainbow", name: "Geopak: Rainbow Living", count: 0 },
+  { id: "geopak_hypno", name: "Geopak: Hypno Rock", count: 0 }
 ];
 
 export function usePlayerUi({
