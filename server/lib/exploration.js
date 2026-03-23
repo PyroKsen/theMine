@@ -54,7 +54,7 @@ function encodeExplored(set) {
   return JSON.stringify(list);
 }
 
-function chunkIntersectsView(player, cx, cy) {
+function chunkIntersectsView(player, cx, cy) {
   const x0 = cx * CHUNK_SIZE;
   const y0 = cy * CHUNK_SIZE;
   const x1 = Math.min(x0 + CHUNK_SIZE - 1, MAP_W - 1);

@@ -1,39 +1,92 @@
 import { TILE_TYPES, VIEW_RADIUS_TILES } from "./constants.js";
+import { darkenHexColor } from "./render/tileDrawing.js";
+import { getTileHexColor, isBuiltBlockTile } from "./render/tileColors.js";
+
+const terrainChunkCanvasCache = new Map();
+const buildingChunkCanvasCache = new Map();
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
-
-function isBuiltBlockTile(type) {
-  return (
-    type === TILE_TYPES.buildGreen ||
-    type === TILE_TYPES.buildYellow ||
-    type === TILE_TYPES.buildRed
-  );
+function chunkCacheKey(kind, cx, cy) {
+  return `${kind}:${cx},${cy}`;
 }
 
-
-function isLivingCrystalTile(type) {
-  return (
-    type === TILE_TYPES.liveCrystalBlue ||
-    type === TILE_TYPES.liveCrystalWhite ||
-    type === TILE_TYPES.liveCrystalPink ||
-    type === TILE_TYPES.liveCrystalRed ||
-    type === TILE_TYPES.liveCrystalCyan ||
-    type === TILE_TYPES.liveCrystalRainbow
-  );
-}function darkenHexColor(hex, factor = 0.72) {
-  const safe = Math.max(0, Math.min(1, factor));
-  const value = String(hex || "#000000").replace("#", "");
-  const padded = value.length === 3
-    ? value.split("").map((part) => part + part).join("")
-    : value.padStart(6, "0");
-  const r = Math.max(0, Math.min(255, Math.round(parseInt(padded.slice(0, 2), 16) * safe)));
-  const g = Math.max(0, Math.min(255, Math.round(parseInt(padded.slice(2, 4), 16) * safe)));
-  const b = Math.max(0, Math.min(255, Math.round(parseInt(padded.slice(4, 6), 16) * safe)));
-  return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
+export function resetWorldMapChunkCache() {
+  terrainChunkCanvasCache.clear();
+  buildingChunkCanvasCache.clear();
 }
+
+export function invalidateWorldMapChunkCache(cx, cy) {
+  terrainChunkCanvasCache.delete(chunkCacheKey("terrain", cx, cy));
+  buildingChunkCanvasCache.delete(chunkCacheKey("building", cx, cy));
+}
+
+function chunkIntersectsViewport(chunk, chunkSize, worldW, worldH, originX, originY, scale, width, height) {
+  const startX = originX + chunk.cx * chunkSize * scale;
+  const startY = originY + chunk.cy * chunkSize * scale;
+  const drawW = Math.min(chunkSize, worldW - chunk.cx * chunkSize) * scale;
+  const drawH = Math.min(chunkSize, worldH - chunk.cy * chunkSize) * scale;
+  return startX < width && startY < height && startX + drawW > 0 && startY + drawH > 0;
+}
+
+function getTileMapColor(type) {
+  return getTileHexColor(type);
+}
+
+function getTerrainChunkCanvas(chunk) {
+  const key = chunkCacheKey("terrain", chunk.cx, chunk.cy);
+  const cached = terrainChunkCanvasCache.get(key);
+  if (cached) return cached;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, chunk.w);
+  canvas.height = Math.max(1, chunk.h);
+  const ctx = canvas.getContext("2d", { alpha: true });
+
+  for (let y = 0; y < chunk.h; y += 1) {
+    for (let x = 0; x < chunk.w; x += 1) {
+      const type = chunk.data[y * chunk.w + x];
+      if (type === TILE_TYPES.dropBox) {
+        ctx.fillStyle = "#d4b468";
+        ctx.fillRect(x, y, 1, 1);
+        continue;
+      }
+      const color = getTileMapColor(type);
+      if (!color) continue;
+      ctx.fillStyle = color;
+      ctx.fillRect(x, y, 1, 1);
+    }
+  }
+
+  terrainChunkCanvasCache.set(key, canvas);
+  return canvas;
+}
+
+function getBuildingChunkCanvas(chunk) {
+  const key = chunkCacheKey("building", chunk.cx, chunk.cy);
+  const cached = buildingChunkCanvasCache.get(key);
+  if (cached) return cached;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, chunk.w);
+  canvas.height = Math.max(1, chunk.h);
+  const ctx = canvas.getContext("2d", { alpha: true });
+  ctx.fillStyle = "#c8ced9";
+
+  for (let y = 0; y < chunk.h; y += 1) {
+    for (let x = 0; x < chunk.w; x += 1) {
+      if (chunk.data[y * chunk.w + x]) {
+        ctx.fillRect(x, y, 1, 1);
+      }
+    }
+  }
+
+  buildingChunkCanvasCache.set(key, canvas);
+  return canvas;
+}
+
 export function drawWorldMapCanvas({
   wrap,
   canvas,
@@ -55,6 +108,7 @@ export function drawWorldMapCanvas({
   canvas.style.width = `${width}px`;
   canvas.style.height = `${height}px`;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.imageSmoothingEnabled = false;
 
   ctx.clearRect(0, 0, width, height);
 
@@ -70,43 +124,24 @@ export function drawWorldMapCanvas({
 
   if (tiles) {
     for (const chunk of tiles.values()) {
+      if (!chunkIntersectsViewport(chunk, chunkSize, w, h, originX, originY, scale, width, height)) {
+        continue;
+      }
       const startX = chunk.cx * chunkSize;
       const startY = chunk.cy * chunkSize;
+      const drawX = originX + startX * scale;
+      const drawY = originY + startY * scale;
+      const drawW = Math.min(chunkSize, w - startX) * scale;
+      const drawH = Math.min(chunkSize, h - startY) * scale;
+
+      if (scale <= 4) {
+        ctx.drawImage(getTerrainChunkCanvas(chunk), drawX, drawY, drawW, drawH);
+        continue;
+      }
+
       for (let y = 0; y < chunk.h; y += 1) {
         for (let x = 0; x < chunk.w; x += 1) {
           const type = chunk.data[y * chunk.w + x];
-          let color = null;
-          if (type === TILE_TYPES.rock) color = "#2b0f4d";
-          if (type === TILE_TYPES.crystalGreen) color = "#38d86b";
-          if (type === TILE_TYPES.crystalBlue) color = "#4da3ff";
-          if (type === TILE_TYPES.crystalWhite) color = "#f0f4ff";
-          if (type === TILE_TYPES.crystalRed) color = "#ff5d5d";
-          if (type === TILE_TYPES.crystalPink) color = "#ff7fd6";
-          if (type === TILE_TYPES.crystalCyan) color = "#5ee9ff";
-          if (type === TILE_TYPES.blackRock) color = "#0b0b0f";
-          if (type === TILE_TYPES.redRock) color = "#7a0f0f";
-          if (type === TILE_TYPES.semiMagneticRock) color = "#5f4b2b";
-          if (type === TILE_TYPES.magneticRock) color = "#7f6816";
-          if (type === TILE_TYPES.acidRock) color = "#1d4f2f";
-          if (type === TILE_TYPES.reinforcedRock) color = "#3a272c";
-          if (type === TILE_TYPES.ironRock) color = "#2d3135";
-          if (type === TILE_TYPES.steelRock) color = "#1e2125";
-          if (type === TILE_TYPES.slimeRock) color = "#2f6f44";
-          if (type === TILE_TYPES.corrosiveRock) color = "#74d44f";
-          if (type === TILE_TYPES.radioactiveRock) color = "#9dff2f";
-          if (type === TILE_TYPES.sand) color = "#d4b24a";
-          if (type === TILE_TYPES.steelSand) color = "#7fc9ff";
-          if (type === TILE_TYPES.magma) color = "#6a1b08";
-          if (type === TILE_TYPES.liveCrystalBlue) color = "#2e63ff";
-          if (type === TILE_TYPES.liveCrystalWhite) color = "#fff2a8";
-          if (type === TILE_TYPES.liveCrystalPink) color = "#a85cff";
-          if (type === TILE_TYPES.liveCrystalRed) color = "#ff3f52";
-          if (type === TILE_TYPES.liveCrystalCyan) color = "#56f0ff";
-          if (type === TILE_TYPES.hypnoRock) color = "#15203a";
-          if (type === TILE_TYPES.liveCrystalRainbow) color = "#ffcf5a";
-          if (type === TILE_TYPES.buildGreen) color = "#3bd97a";
-          if (type === TILE_TYPES.buildYellow) color = "#f9c74f";
-          if (type === TILE_TYPES.buildRed) color = "#ff6b6b";
           if (type === TILE_TYPES.dropBox) {
             const cx = originX + (startX + x + 0.5) * scale;
             const cy = originY + (startY + y + 0.5) * scale;
@@ -121,22 +156,22 @@ export function drawWorldMapCanvas({
             ctx.fill();
             continue;
           }
-          if (color) {
-            const tileX = originX + (startX + x) * scale;
-            const tileY = originY + (startY + y) * scale;
-            ctx.fillStyle = color;
-            ctx.fillRect(tileX, tileY, scale, scale);
-            if (isBuiltBlockTile(type) && scale >= 3) {
-              const inset = Math.max(0.75, scale * 0.18);
-              ctx.strokeStyle = darkenHexColor(color, 0.66);
-              ctx.lineWidth = Math.max(1, scale * 0.12);
-              ctx.beginPath();
-              ctx.moveTo(tileX + inset, tileY + inset);
-              ctx.lineTo(tileX + scale - inset, tileY + scale - inset);
-              ctx.moveTo(tileX + scale - inset, tileY + inset);
-              ctx.lineTo(tileX + inset, tileY + scale - inset);
-              ctx.stroke();
-            }
+          const color = getTileMapColor(type);
+          if (!color) continue;
+          const tileX = originX + (startX + x) * scale;
+          const tileY = originY + (startY + y) * scale;
+          ctx.fillStyle = color;
+          ctx.fillRect(tileX, tileY, scale, scale);
+          if (isBuiltBlockTile(type) && scale >= 3) {
+            const inset = Math.max(0.75, scale * 0.18);
+            ctx.strokeStyle = darkenHexColor(color, 0.66);
+            ctx.lineWidth = Math.max(1, scale * 0.12);
+            ctx.beginPath();
+            ctx.moveTo(tileX + inset, tileY + inset);
+            ctx.lineTo(tileX + scale - inset, tileY + scale - inset);
+            ctx.moveTo(tileX + scale - inset, tileY + inset);
+            ctx.lineTo(tileX + inset, tileY + scale - inset);
+            ctx.stroke();
           }
         }
       }
@@ -146,17 +181,25 @@ export function drawWorldMapCanvas({
   if (buildings) {
     ctx.fillStyle = "#c8ced9";
     for (const chunk of buildings.values()) {
+      if (!chunkIntersectsViewport(chunk, chunkSize, w, h, originX, originY, scale, width, height)) {
+        continue;
+      }
       const startX = chunk.cx * chunkSize;
       const startY = chunk.cy * chunkSize;
+      const drawX = originX + startX * scale;
+      const drawY = originY + startY * scale;
+      const drawW = Math.min(chunkSize, w - startX) * scale;
+      const drawH = Math.min(chunkSize, h - startY) * scale;
+
+      if (scale <= 4) {
+        ctx.drawImage(getBuildingChunkCanvas(chunk), drawX, drawY, drawW, drawH);
+        continue;
+      }
+
       for (let y = 0; y < chunk.h; y += 1) {
         for (let x = 0; x < chunk.w; x += 1) {
           if (chunk.data[y * chunk.w + x]) {
-            ctx.fillRect(
-              originX + (startX + x) * scale,
-              originY + (startY + y) * scale,
-              scale,
-              scale
-            );
+            ctx.fillRect(originX + (startX + x) * scale, originY + (startY + y) * scale, scale, scale);
           }
         }
       }
@@ -173,6 +216,9 @@ export function drawWorldMapCanvas({
       const startY = cy * chunkSize * scale + originY;
       const fogW = Math.min(chunkSize, w - cx * chunkSize) * scale;
       const fogH = Math.min(chunkSize, h - cy * chunkSize) * scale;
+      if (startX >= width || startY >= height || startX + fogW <= 0 || startY + fogH <= 0) {
+        continue;
+      }
       ctx.fillRect(startX, startY, fogW, fogH);
     }
   }
@@ -248,18 +294,3 @@ export function getMapHoverPosition({ wrap, mapData, mapView, clientX, clientY }
     inside: true
   };
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

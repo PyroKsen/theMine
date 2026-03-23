@@ -113,6 +113,7 @@ function runFractionalTileDamageTest() {
     world = buildWorld(dataDir);
     const x = 8;
     const y = 8;
+    world.mapStore.setTile(x, y, TILE_TYPES.rock);
     assert.strictEqual(world.mapStore.getTile(x, y), TILE_TYPES.rock);
 
     const firstHit = world.worldActions.damageTile(x, y, "tester", null, 2.7);
@@ -144,6 +145,7 @@ function runTileHpPersistenceTest() {
     world = buildWorld(dataDir);
     const x = 8;
     const y = 8;
+    world.mapStore.setTile(x, y, TILE_TYPES.rock);
     const type = world.mapStore.getTile(x, y);
     const baseHp = TILE_HP.get(type);
     assert.ok(baseHp > 1, "expected a default solid tile for tileHp test");
@@ -171,6 +173,7 @@ function runTileHpOverrideCleanupTest() {
     world = buildWorld(dataDir);
     const x = 8;
     const y = 8;
+    world.mapStore.setTile(x, y, TILE_TYPES.rock);
     const baseHp = TILE_HP.get(world.mapStore.getTile(x, y));
     world.mapStore.setTileHp(x, y, baseHp - 1);
     flushAll(world);
@@ -198,6 +201,11 @@ function runBuildingLayerRepairTest() {
   try {
     world = buildWorld(dataDir);
     const player = { username: "host", facingX: 0, facingY: -1 };
+    for (let ty = 37; ty <= 43; ty += 1) {
+      for (let tx = 37; tx <= 43; tx += 1) {
+        world.mapStore.setTile(tx, ty, TILE_TYPES.empty);
+      }
+    }
     const placed = world.buildingManager.placeRespawn(player, 40, 40);
     assert.ok(placed, "failed to place respawn building in fixture");
     const building = world.buildingManager.buildings.find((entry) => entry.type === "respawn");
@@ -235,6 +243,11 @@ function runBuildingLayerRepairPersistenceTest() {
   try {
     world = buildWorld(dataDir);
     const player = { username: "host", facingX: 0, facingY: -1 };
+    for (let ty = 137; ty <= 143; ty += 1) {
+      for (let tx = 137; tx <= 143; tx += 1) {
+        world.mapStore.setTile(tx, ty, TILE_TYPES.empty);
+      }
+    }
     assert.ok(world.buildingManager.placeRespawn(player, 140, 140));
     flushAll(world);
 
@@ -309,8 +322,8 @@ function runDropBoxRestoreFromDbTest() {
   try {
     const prepDb = createDb(dataDir);
     prepDb.dropBoxDb.stmtInsertOrReplaceDropBox.run({
-      x: 61,
-      y: 61,
+      x: 22,
+      y: 22,
       crystalsJson: JSON.stringify({ green: 3, blue: 1 }),
       createdAt: Date.now()
     });
@@ -320,8 +333,8 @@ function runDropBoxRestoreFromDbTest() {
     const result = world.worldActions.syncDropBoxesOnMap();
 
     assert.strictEqual(result.restoredTiles, 1);
-    assert.strictEqual(world.mapStore.getTile(61, 61), TILE_TYPES.dropBox);
-    assert.strictEqual(world.mapStore.getTileHp(61, 61), 1);
+    assert.strictEqual(world.mapStore.getTile(22, 22), TILE_TYPES.dropBox);
+    assert.strictEqual(world.mapStore.getTileHp(22, 22), 1);
   } finally {
     closeDbSafe(world);
     removeDirSafe(dataDir);

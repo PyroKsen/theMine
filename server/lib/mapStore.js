@@ -12,6 +12,7 @@ const {
   writeFileAtomic,
   writeJsonAtomic
 } = require("./persistence");
+const { generateInitialMap } = require("./world/generation");
 
 const MAP_MAGIC = "TMAP";
 const MAP_VERSION = 1;
@@ -124,119 +125,7 @@ function buildTileHpOverrides(tileHp, getTile) {
   return overrides;
 }
 
-function generateInitialMap(setTile) {
-  fillRect(setTile, 8, 8, 10, 6, TILE_TYPES.rock);
-  fillRect(setTile, 28, 16, 8, 10, TILE_TYPES.rock);
-  fillRect(setTile, 14, 30, 12, 5, TILE_TYPES.rock);
-  fillRect(setTile, 4, 4, 1, 1, TILE_TYPES.crystalGreen);
-  fillRect(setTile, 5, 4, 1, 1, TILE_TYPES.crystalBlue);
-  fillRect(setTile, 6, 4, 1, 1, TILE_TYPES.crystalWhite);
-  fillRect(setTile, 7, 4, 1, 1, TILE_TYPES.crystalRed);
-  fillRect(setTile, 8, 4, 1, 1, TILE_TYPES.crystalPink);
-  fillRect(setTile, 9, 4, 1, 1, TILE_TYPES.crystalCyan);
-  fillRect(setTile, 10, 4, 1, 1, TILE_TYPES.blackRock);
-  fillRect(setTile, 11, 4, 1, 1, TILE_TYPES.redRock);
-  fillRect(setTile, 12, 4, 1, 1, TILE_TYPES.semiMagneticRock);
-  fillRect(setTile, 13, 4, 1, 1, TILE_TYPES.magneticRock);
-  fillRect(setTile, 14, 4, 1, 1, TILE_TYPES.acidRock);
-  fillRect(setTile, 15, 4, 1, 1, TILE_TYPES.reinforcedRock);
-  fillRect(setTile, 16, 4, 1, 1, TILE_TYPES.ironRock);
-  fillRect(setTile, 17, 4, 1, 1, TILE_TYPES.steelRock);
-  fillRect(setTile, 18, 4, 1, 1, TILE_TYPES.slimeRock);
-  fillRect(setTile, 19, 4, 1, 1, TILE_TYPES.corrosiveRock);
-  fillRect(setTile, 20, 4, 1, 1, TILE_TYPES.radioactiveRock);
-  fillRect(setTile, 21, 4, 1, 1, TILE_TYPES.sand);
-  fillRect(setTile, 22, 4, 1, 1, TILE_TYPES.steelSand);
-  fillRect(setTile, 23, 4, 1, 1, TILE_TYPES.magma);
-  fillRect(setTile, 24, 4, 1, 1, TILE_TYPES.liveCrystalBlue);
-  fillRect(setTile, 25, 4, 1, 1, TILE_TYPES.liveCrystalWhite);
-  fillRect(setTile, 25, 3, 1, 1, TILE_TYPES.magma);
-  fillRect(setTile, 26, 4, 1, 1, TILE_TYPES.liveCrystalPink);
-  fillRect(setTile, 27, 4, 1, 1, TILE_TYPES.liveCrystalRed);
-  fillRect(setTile, 27, 3, 1, 1, TILE_TYPES.blackRock);
-  fillRect(setTile, 28, 4, 1, 1, TILE_TYPES.liveCrystalCyan);
-  fillRect(setTile, 29, 4, 1, 1, TILE_TYPES.hypnoRock);
-  fillRect(setTile, 30, 4, 1, 1, TILE_TYPES.liveCrystalRainbow);
-  fillRect(setTile, 30, 3, 1, 1, TILE_TYPES.rock);
 
-  fillRect(setTile, 8, 44, 1, 1, TILE_TYPES.liveCrystalBlue);
-  fillRect(setTile, 12, 44, 1, 1, TILE_TYPES.liveCrystalBlue);
-  fillRect(setTile, 16, 44, 1, 1, TILE_TYPES.liveCrystalBlue);
-
-  fillRect(setTile, 22, 44, 1, 1, TILE_TYPES.liveCrystalWhite);
-  fillRect(setTile, 22, 43, 1, 1, TILE_TYPES.magma);
-  fillRect(setTile, 26, 44, 1, 1, TILE_TYPES.liveCrystalWhite);
-  fillRect(setTile, 26, 43, 1, 1, TILE_TYPES.magma);
-  fillRect(setTile, 30, 44, 1, 1, TILE_TYPES.liveCrystalWhite);
-  fillRect(setTile, 30, 43, 1, 1, TILE_TYPES.magma);
-
-  fillRect(setTile, 36, 44, 1, 1, TILE_TYPES.liveCrystalPink);
-  fillRect(setTile, 40, 44, 1, 1, TILE_TYPES.liveCrystalPink);
-  fillRect(setTile, 44, 44, 1, 1, TILE_TYPES.liveCrystalPink);
-
-  fillRect(setTile, 50, 44, 1, 1, TILE_TYPES.liveCrystalRed);
-  fillRect(setTile, 49, 43, 1, 1, TILE_TYPES.blackRock);
-  fillRect(setTile, 54, 44, 1, 1, TILE_TYPES.liveCrystalRed);
-  fillRect(setTile, 53, 43, 1, 1, TILE_TYPES.blackRock);
-  fillRect(setTile, 58, 44, 1, 1, TILE_TYPES.liveCrystalRed);
-  fillRect(setTile, 57, 43, 1, 1, TILE_TYPES.blackRock);
-
-  fillRect(setTile, 64, 44, 1, 1, TILE_TYPES.liveCrystalCyan);
-  fillRect(setTile, 68, 44, 1, 1, TILE_TYPES.liveCrystalCyan);
-  fillRect(setTile, 72, 44, 1, 1, TILE_TYPES.liveCrystalCyan);
-
-  fillRect(setTile, 78, 44, 1, 1, TILE_TYPES.hypnoRock);
-  fillRect(setTile, 82, 44, 1, 1, TILE_TYPES.hypnoRock);
-
-  fillRect(setTile, 88, 44, 1, 1, TILE_TYPES.liveCrystalRainbow);
-  fillRect(setTile, 88, 43, 1, 1, TILE_TYPES.rock);
-  fillRect(setTile, 92, 44, 1, 1, TILE_TYPES.liveCrystalRainbow);
-  fillRect(setTile, 92, 43, 1, 1, TILE_TYPES.acidRock);
-  fillRect(setTile, 96, 44, 1, 1, TILE_TYPES.liveCrystalRainbow);
-  fillRect(setTile, 96, 43, 1, 1, TILE_TYPES.reinforcedRock);
-
-  const patches = [
-    { x: 18, y: 6, w: 6, h: 4, type: TILE_TYPES.crystalGreen },
-    { x: 26, y: 6, w: 5, h: 4, type: TILE_TYPES.crystalBlue },
-    { x: 33, y: 6, w: 5, h: 4, type: TILE_TYPES.crystalWhite },
-    { x: 40, y: 6, w: 4, h: 4, type: TILE_TYPES.crystalRed },
-    { x: 46, y: 6, w: 4, h: 4, type: TILE_TYPES.crystalPink },
-    { x: 52, y: 6, w: 4, h: 4, type: TILE_TYPES.crystalCyan },
-    { x: 16, y: 18, w: 8, h: 5, type: TILE_TYPES.crystalGreen },
-    { x: 28, y: 18, w: 6, h: 5, type: TILE_TYPES.crystalBlue },
-    { x: 36, y: 18, w: 6, h: 5, type: TILE_TYPES.crystalWhite },
-    { x: 44, y: 18, w: 5, h: 5, type: TILE_TYPES.crystalRed },
-    { x: 52, y: 18, w: 5, h: 5, type: TILE_TYPES.crystalPink },
-    { x: 60, y: 18, w: 5, h: 5, type: TILE_TYPES.crystalCyan },
-    { x: 22, y: 32, w: 7, h: 5, type: TILE_TYPES.crystalGreen },
-    { x: 32, y: 32, w: 6, h: 5, type: TILE_TYPES.crystalBlue },
-    { x: 40, y: 32, w: 6, h: 5, type: TILE_TYPES.crystalWhite },
-    { x: 48, y: 32, w: 5, h: 5, type: TILE_TYPES.crystalRed },
-    { x: 56, y: 32, w: 5, h: 5, type: TILE_TYPES.crystalPink },
-    { x: 64, y: 32, w: 5, h: 5, type: TILE_TYPES.crystalCyan },
-    { x: 72, y: 8, w: 5, h: 4, type: TILE_TYPES.blackRock },
-    { x: 78, y: 8, w: 5, h: 4, type: TILE_TYPES.redRock },
-    { x: 84, y: 8, w: 5, h: 4, type: TILE_TYPES.semiMagneticRock },
-    { x: 90, y: 8, w: 5, h: 4, type: TILE_TYPES.magneticRock },
-    { x: 72, y: 16, w: 5, h: 4, type: TILE_TYPES.acidRock },
-    { x: 78, y: 16, w: 5, h: 4, type: TILE_TYPES.slimeRock },
-    { x: 84, y: 16, w: 5, h: 4, type: TILE_TYPES.corrosiveRock },
-    { x: 90, y: 16, w: 5, h: 4, type: TILE_TYPES.radioactiveRock },
-    { x: 72, y: 24, w: 5, h: 4, type: TILE_TYPES.reinforcedRock },
-    { x: 78, y: 24, w: 5, h: 4, type: TILE_TYPES.ironRock },
-    { x: 84, y: 24, w: 5, h: 4, type: TILE_TYPES.steelRock },
-    { x: 8, y: 44, w: 6, h: 2, type: TILE_TYPES.rock },
-    { x: 18, y: 44, w: 6, h: 2, type: TILE_TYPES.blackRock },
-    { x: 28, y: 44, w: 6, h: 2, type: TILE_TYPES.reinforcedRock },
-    { x: 9, y: 36, w: 4, h: 4, type: TILE_TYPES.sand },
-    { x: 19, y: 36, w: 4, h: 4, type: TILE_TYPES.steelSand },
-    { x: 29, y: 36, w: 4, h: 4, type: TILE_TYPES.magma }
-  ];
-
-  for (const patch of patches) {
-    fillRect(setTile, patch.x, patch.y, patch.w, patch.h, patch.type);
-  }
-}
 
 function createMapStore(dataDir) {
   fs.mkdirSync(dataDir, { recursive: true });

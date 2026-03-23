@@ -1,29 +1,27 @@
-import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
+import React, { Suspense, lazy, useEffect, useRef, useState } from "react";
 import {
   BASE_MAX_DEPTH_TILES,
   DEFAULT_MAP,
   DEFAULT_SKILL_CONFIG,
-  DEPTH_PER_LEVEL,
-  TILE_BASE_HP,
-  TILE_DISPLAY
+  DEPTH_PER_LEVEL
 } from "./constants.js";
 import { chunkKey, formatSkillTotal } from "./helpers.js";
 import { ChatPanel } from "./overlays/ChatPanel.jsx";
 import { ConfirmModal } from "./overlays/ConfirmModal.jsx";
 import { DropCrystalsModal } from "./overlays/DropCrystalsModal.jsx";
 import { OwnedBuildingsModal } from "./overlays/OwnedBuildingsModal.jsx";
-import { isSocketOpen, requestMapChunks, sendBuildAction, sendInput } from "./socketApi.js";
+import { isSocketOpen } from "./socketApi.js";
 import { saveChunkCache as saveCachedChunk } from "./chunkCache.js";
-import { createSocketMessageHandler } from "./messageHandlers.js";
-import {
-  applyMapZoom,
-  drawWorldMapCanvas,
-  getMapHoverPosition
-} from "./worldMap.js";
 import { createGameRenderer } from "./gameRenderer.js";
+import { getFrontTileInfo } from "./targetBlock.js";
+import { useWorldMapUi } from "./useWorldMapUi.js";
+import { useRespawnStatus } from "./useRespawnStatus.js";
+import { requestVisibleChunks } from "./chunkRequests.js";
 import { useBuildingUi } from "./useBuildingUi.js";
 import { usePlayerUi } from "./usePlayerUi.js";
 import { useSkillUi } from "./useSkillUi.js";
+import { useGameShortcuts } from "./useGameShortcuts.js";
+import { useGameSession } from "./useGameSession.js";
 
 const StorageModal = lazy(() =>
   import("./overlays/StorageModal.jsx").then((module) => ({
@@ -94,7 +92,6 @@ export default function GameView({ token, onAuthExpired }) {
     playerId: null
   });
   const mapHoverRef = useRef({ x: null, y: null, inside: false });
-  const lastKnownRespawnCoordsRef = useRef({ x: 1, y: 1 });
   const [status, setStatus] = useState("connecting");
   const [playerCount, setPlayerCount] = useState(0);
   const [coords, setCoords] = useState({ x: 0, y: 0 });
@@ -245,219 +242,67 @@ export default function GameView({ token, onAuthExpired }) {
     wallet
   });
 
-  const statusLabel =
-    status === "connecting"
-      ? "Connecting"
-      : status === "online"
-      ? "Online"
-      : status === "offline"
-      ? "Offline"
-      : status === "unauthorized"
-      ? "Unauthorized"
-      : status === "already_online"
-      ? "Already online"
-      : status;
-  const selectedRespawnBuilding = respawnBuildingId
-    ? buildingsRef.current.find((building) => building.id === respawnBuildingId) || null
-    : null;
-  if (selectedRespawnBuilding?.center) {
-    lastKnownRespawnCoordsRef.current = {
-      x: selectedRespawnBuilding.center.x,
-      y: selectedRespawnBuilding.center.y
-    };
-  } else if (!respawnBuildingId) {
-    lastKnownRespawnCoordsRef.current = { x: 1, y: 1 };
-  }
-  const respawnCoords = respawnBuildingId
-    ? lastKnownRespawnCoordsRef.current
-    : { x: 1, y: 1 };
+  const {
+    statusLabel,
+    respawnCoords,
+    confirmResetRespawn,
+    confirmForceDeath
+  } = useRespawnStatus({
+    status,
+    buildingsRef,
+    respawnBuildingId,
+    setConfirmState,
+    resetRespawnSelection,
+    forceDeath
+  });
 
-  function getLoadedTileType(tx, ty) {
-    const { w, h, chunk, tiles } = mapDataRef.current;
-    if (tx < 0 || ty < 0 || tx >= w || ty >= h) return null;
-    const chunkSize = chunk || DEFAULT_MAP.chunk;
-    const cx = Math.floor(tx / chunkSize);
-    const cy = Math.floor(ty / chunkSize);
-    const loadedChunk = tiles.get(chunkKey(cx, cy));
-    if (!loadedChunk) return null;
-    const lx = tx - cx * chunkSize;
-    const ly = ty - cy * chunkSize;
-    if (lx < 0 || ly < 0 || lx >= loadedChunk.w || ly >= loadedChunk.h) {
-      return null;
-    }
-    return loadedChunk.data[ly * loadedChunk.w + lx];
-  }
-
-  function getTrackedTileHp(tx, ty, type) {
-    if (type == null) return null;
-    const tracked = tileHpRef.current.get(`${tx},${ty}`);
-    if (tracked && Number.isFinite(tracked.current) && Number.isFinite(tracked.max)) {
-      return tracked;
-    }
-    const base = TILE_BASE_HP[type];
-    if (!Number.isFinite(base)) return null;
-    return { current: base, max: base };
-  }
-
-  const frontTileInfo = (() => {
-    const player = localPlayerRef.current;
-    if (!player.ready) {
-      return { name: "Unknown", color: "#253140", coords: null, hp: null };
-    }
-    const tx = player.tx + player.fx;
-    const ty = player.ty + player.fy;
-    const type = getLoadedTileType(tx, ty);
-    if (type == null) {
-      return { name: "Unknown", color: "#253140", coords: { x: tx, y: ty }, hp: null };
-    }
-    const display = TILE_DISPLAY[type] || { name: `Tile ${type}`, color: "#253140" };
-    return { ...display, coords: { x: tx, y: ty }, hp: getTrackedTileHp(tx, ty, type) };
-  })();
+  const frontTileInfo = getFrontTileInfo({
+    localPlayerRef,
+    mapDataRef,
+    tileHpRef
+  });
 
   const maxDepth =
     BASE_MAX_DEPTH_TILES + (Number(skills.depth?.level || 0) * DEPTH_PER_LEVEL);
 
   const isOverDepth = coords.y > maxDepth;
 
-  function confirmResetRespawn() {
-    setConfirmState({
-      title: "Reset Respawn",
-      message: "Reset respawn point to 1,1?",
-      confirmLabel: "Reset",
-      onConfirm: () => {
-        setConfirmState(null);
-        resetRespawnSelection();
-      }
-    });
-  }
-
-  function confirmForceDeath() {
-    setConfirmState({
-      title: "Force Death",
-      message: "Kill the robot now?",
-      confirmLabel: "Die",
-      onConfirm: () => {
-        setConfirmState(null);
-        forceDeath();
-      }
-    });
-  }
-
   function requestChunks(chunks, options = {}) {
-    const socket = socketRef.current;
-    if (!isSocketOpen(socket)) return;
-    const { w, h, chunk } = mapDataRef.current;
-    if (!chunk) return;
-    const force = Boolean(options.force);
-    const maxCx = Math.ceil(w / chunk) - 1;
-    const maxCy = Math.ceil(h / chunk) - 1;
-    const pending = [];
-    for (const entry of chunks) {
-      const cx = Number(entry.cx);
-      const cy = Number(entry.cy);
-      if (!Number.isFinite(cx) || !Number.isFinite(cy)) continue;
-      if (cx < 0 || cy < 0 || cx > maxCx || cy > maxCy) continue;
-      const key = chunkKey(cx, cy);
-      if (!force && loadedChunksRef.current.has(key)) continue;
-      pending.push({ cx, cy });
-      if (pending.length >= 32) {
-        requestMapChunks(socket, pending);
-        pending.length = 0;
-      }
-    }
-    if (pending.length > 0) {
-      requestMapChunks(socket, pending);
-    }
-  }
-
-  const handleMapWrapRef = useCallback((node) => {
-    mapWrapRef.current = node;
-    setMapWrapEl(node);
-  }, []);
-
-  function requestMapDraw() {
-    if (!mapOpenRef.current) return;
-    if (mapDrawRafRef.current) return;
-    mapDrawRafRef.current = window.requestAnimationFrame(() => {
-      mapDrawRafRef.current = null;
-      drawWorldMap();
+    return requestVisibleChunks({
+      socketRef,
+      mapDataRef,
+      loadedChunksRef,
+      chunks,
+      options
     });
   }
 
-  function drawWorldMap() {
-    drawWorldMapCanvas({
-      wrap: mapWrapRef.current,
-      canvas: mapCanvasRef.current,
-      mapData: mapDataRef.current,
-      mapView: mapViewRef.current,
-      exploredChunks: exploredChunksRef.current,
-      localPlayer: localPlayerRef.current,
-      chunkKey
-    });
-  }
-
-  function zoomMapAt(clientX, clientY, factor) {
-    const changed = applyMapZoom({
-      wrap: mapWrapRef.current,
-      mapData: mapDataRef.current,
-      mapView: mapViewRef.current,
-      clientX,
-      clientY,
-      factor
-    });
-    if (changed) {
-      requestMapDraw();
-    }
-  }
-
-
-  function handleMapMouseDown(event) {
-    if (event.button !== 0) return;
-    mapViewRef.current.lastX = event.clientX;
-    mapViewRef.current.lastY = event.clientY;
-    setMapPanning(true);
-    updateMapHover(event.clientX, event.clientY);
-  }
+  const {
+    handleMapWrapRef,
+    requestMapDraw,
+    zoomMapAt,
+    handleMapMouseDown,
+    handleMapMouseMove: handleMapMouseMoveInternal,
+    handleMapMouseUp,
+    handleMapMouseLeave
+  } = useWorldMapUi({
+    setMapWrapEl,
+    setMapPanning,
+    setMapHover,
+    mapWrapRef,
+    mapCanvasRef,
+    mapDrawRafRef,
+    mapOpenRef,
+    mapViewRef,
+    mapDataRef,
+    exploredChunksRef,
+    localPlayerRef,
+    mapHoverRef,
+    chunkKey
+  });
 
   function handleMapMouseMove(event) {
-    if (mapPanning) {
-      const view = mapViewRef.current;
-      const dx = event.clientX - view.lastX;
-      const dy = event.clientY - view.lastY;
-      view.panX += dx;
-      view.panY += dy;
-      view.lastX = event.clientX;
-      view.lastY = event.clientY;
-      requestMapDraw();
-    }
-    updateMapHover(event.clientX, event.clientY);
-  }
-
-  function handleMapMouseUp() {
-    setMapPanning(false);
-  }
-
-  function handleMapMouseLeave() {
-    setMapPanning(false);
-    if (mapHoverRef.current.inside) {
-      mapHoverRef.current = { x: null, y: null, inside: false };
-      setMapHover({ x: null, y: null, inside: false });
-    }
-  }
-
-  function updateMapHover(clientX, clientY) {
-    const next = getMapHoverPosition({
-      wrap: mapWrapRef.current,
-      mapData: mapDataRef.current,
-      mapView: mapViewRef.current,
-      clientX,
-      clientY
-    });
-    const prev = mapHoverRef.current;
-    if (prev.x !== next.x || prev.y !== next.y || prev.inside !== next.inside) {
-      mapHoverRef.current = next;
-      setMapHover(next);
-    }
+    handleMapMouseMoveInternal(event, mapPanning);
   }
 
   useEffect(() => {
@@ -514,6 +359,23 @@ export default function GameView({ token, onAuthExpired }) {
     return () => window.removeEventListener("wheel", preventBrowserZoom);
   }, []);
 
+  const runtimeRef = useRef(null);
+  const [runtime, setRuntime] = useState(null);
+
+  useGameShortcuts({
+    runtimeRef,
+    socketRef,
+    chatFocusRef,
+    mapOpenRef,
+    dropOpenRef,
+    ownedBuildingsOpenRef,
+    setMapOpen,
+    setDropOpen,
+    setDropError,
+    setOwnedBuildingsOpen,
+    useSelectedItem
+  });
+
   useEffect(() => {
     if (!token) return undefined;
 
@@ -540,149 +402,53 @@ export default function GameView({ token, onAuthExpired }) {
     });
 
     runtime.mount();
-
-    let socket;
-    let inputInterval;
-
-    const onKeyDown = (event) => {
-      if (event.code === "KeyM" && !event.repeat) {
-        setMapOpen((prev) => !prev);
-        return;
-      }
-      if (event.code === "Escape" && mapOpenRef.current) {
-        setMapOpen(false);
-        return;
-      }
-      if (event.code === "Escape" && dropOpenRef.current) {
-        setDropOpen(false);
-        setDropError("");
-        return;
-      }
-      if (event.code === "Escape" && ownedBuildingsOpenRef.current) {
-        setOwnedBuildingsOpen(false);
-        return;
-      }
-      if (event.code === "KeyF" && !event.repeat && !chatFocusRef.current) {
-        useSelectedItem();
-        return;
-      }
-      if (event.code === "KeyR" && !event.repeat && !chatFocusRef.current) {
-        const currentSocket = socketRef.current;
-        if (isSocketOpen(currentSocket)) {
-          sendBuildAction(currentSocket);
-        }
-        return;
-      }
-      if (
-        (event.code === "ControlLeft" || event.code === "ControlRight") &&
-        !event.repeat &&
-        !chatFocusRef.current
-      ) {
-        runtime.state.keys.slow = !runtime.state.keys.slow;
-        return;
-      }
-      runtime.updateInputKey(event.code, true);
-    };
-
-    const onKeyUp = (event) => {
-      runtime.updateInputKey(event.code, false);
-    };
-
-    window.addEventListener("keydown", onKeyDown);
-    window.addEventListener("keyup", onKeyUp);
-
-    const baseUrl = import.meta.env.VITE_SERVER_URL || "ws://localhost:8080";
-    const serverUrl = `${baseUrl}?token=${encodeURIComponent(token)}`;
-    socket = new WebSocket(serverUrl);
-    socketRef.current = socket;
-
-    socket.addEventListener("open", () => {
-      setStatus("online");
-    });
-    socket.addEventListener("close", (event) => {
-      if (event.code === 4001) {
-        setStatus("unauthorized");
-        if (onAuthExpired) onAuthExpired();
-        return;
-      }
-      if (event.code === 4002) {
-        setStatus("already_online");
-        return;
-      }
-      setStatus("offline");
-    });
-
-    const handleSocketMessage = createSocketMessageHandler({
-      state: runtime.state,
-      usernameRef,
-      mapDataRef,
-      mapOpenRef,
-      hydrateCacheRef,
-      loadedChunksRef,
-      staleChunksRef,
-      exploredChunksRef,
-      chunkRequestTimeRef,
-      buildingsRef,
-      storageIdRef,
-      bombs: runtime.bombs,
-      bombsLayer: runtime.bombsLayer,
-      effects: runtime.effects,
-      effectsLayer: runtime.effectsLayer,
-      setWallet,
-      setHp,
-      setInventory,
-      setSuppressRespawnAutoOpen,
-      setRespawnBuildingId,
-      setSkillConfig,
-      setSkills,
-      setSkillSlots,
-      setDropOpen,
-      setDropError,
-      setChatMessages,
-      setStorageState,
-      setTeleportError,
-      applyItems,
-      updateBuildingWindows,
-      requestMapDraw,
-      drawGrid: runtime.drawGrid,
-      drawTerrain: runtime.drawTerrain,
-      drawBuildings: runtime.drawBuildings,
-      pushSnapshot: runtime.pushSnapshot,
-      storeChunk: runtime.storeChunk,
-      drawTerrainChunk: runtime.drawTerrainChunk,
-      drawBuildingChunk: runtime.drawBuildingChunk,
-      setChunkValue: runtime.setChunkValue,
-      isTileWithinView: runtime.isTileWithinView,
-      createBombSprite: runtime.createBombSprite,
-      updatePlacement: runtime.updatePlacement,
-      saveCachedChunk,
-      resetDropValues,
-      requestChunks,
-      tileHpRef
-    });
-
-    socket.addEventListener("message", handleSocketMessage);
-
-    inputInterval = setInterval(() => {
-      if (!isSocketOpen(socket)) return;
-      sendInput(
-        socket,
-        runtime.currentDir(),
-        runtime.state.keys.slow,
-        runtime.state.keys.shift,
-        runtime.state.keys.mine
-      );
-    }, 50);
+    runtimeRef.current = runtime;
+    setRuntime(runtime);
 
     return () => {
-      window.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("keyup", onKeyUp);
-      if (inputInterval) clearInterval(inputInterval);
-      if (socket) socket.close();
-      socketRef.current = null;
+      runtimeRef.current = null;
+      setRuntime(null);
       runtime.destroy();
     };
-  }, [token, onAuthExpired]);
+  }, [token]);
+
+  useGameSession({
+    token,
+    onAuthExpired,
+    socketRef,
+    runtime,
+    usernameRef,
+    mapDataRef,
+    mapOpenRef,
+    hydrateCacheRef,
+    loadedChunksRef,
+    staleChunksRef,
+    exploredChunksRef,
+    chunkRequestTimeRef,
+    buildingsRef,
+    storageIdRef,
+    setStatus,
+    setWallet,
+    setHp,
+    setInventory,
+    setSuppressRespawnAutoOpen,
+    setRespawnBuildingId,
+    setSkillConfig,
+    setSkills,
+    setSkillSlots,
+    setDropOpen,
+    setDropError,
+    setChatMessages,
+    setStorageState,
+    setTeleportError,
+    applyItems,
+    updateBuildingWindows,
+    requestMapDraw,
+    saveCachedChunk,
+    resetDropValues,
+    requestChunks,
+    tileHpRef
+  });
 
   return (
     <div className="game-wrap">
