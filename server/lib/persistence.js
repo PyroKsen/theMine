@@ -1,8 +1,14 @@
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
+const { MAP_W, MAP_H } = require("./config");
 
-const WORLD_SCHEMA_VERSION = 6;
+const WORLD_SCHEMA_VERSION = 9;
 const WORLD_METADATA_FILE = "world_meta.json";
+
+function createWorldSeed() {
+  return crypto.randomBytes(16).toString("hex");
+}
 
 function buildSourcesOfTruth(version) {
   if (version <= 1) {
@@ -37,7 +43,7 @@ function buildSourcesOfTruth(version) {
       legacyFiles: "removed from runtime persistence"
     };
   }
-  if (version === 5) {
+  if (version === 5 || version === 6) {
     return {
       terrain: "map.bin",
       tileHp: "tile_hp.json (sparse overrides for non-default terrain HP)",
@@ -47,13 +53,25 @@ function buildSourcesOfTruth(version) {
       legacyFiles: "removed from runtime persistence"
     };
   }
+  if (version === 7 || version === 8) {
+    return {
+      terrain: "terrain_chunks/*.bin",
+      tileHp: "tile_hp.json (sparse overrides for non-default terrain HP)",
+      buildings: "themine.db::buildings",
+      buildingLayer: "building_chunks/*.bin (derived cache repaired from SQLite buildings at startup)",
+      dropBoxes: "themine.db::drop_boxes",
+      legacyFiles: "map.bin/buildings.bin kept only as migration fallback"
+    };
+  }
   return {
-    terrain: "map.bin",
+    terrain: "terrain_chunks/*.bin",
     tileHp: "tile_hp.json (sparse overrides for non-default terrain HP)",
     buildings: "themine.db::buildings",
-    buildingLayer: "buildings.bin (derived cache repaired from SQLite buildings at startup)",
+    buildingLayer: "building_chunks/*.bin (derived cache repaired from SQLite buildings at startup)",
     dropBoxes: "themine.db::drop_boxes",
-    legacyFiles: "removed from runtime persistence"
+    legacyFiles: "map.bin/buildings.bin kept only as migration fallback",
+    worldSeed: "world_meta.json::worldSeed",
+    worldDimensions: "world_meta.json::worldWidth/worldHeight"
   };
 }
 
@@ -100,6 +118,50 @@ const WORLD_MIGRATIONS = Object.freeze([
     description: "track explicit migration lifecycle separately from startup repair",
     up(metadata, context) {
       metadata.sourcesOfTruth = buildSourcesOfTruth(6);
+      metadata.migrationState = {
+        runner: "worldMigrations",
+        repairSeparated: true,
+        lastMigratedAt: context.now
+      };
+    }
+  },
+  {
+    version: 7,
+    description: "store terrain and building layers as chunk files instead of whole-map binaries",
+    up(metadata, context) {
+      metadata.sourcesOfTruth = buildSourcesOfTruth(7);
+      metadata.migrationState = {
+        runner: "worldMigrations",
+        repairSeparated: true,
+        lastMigratedAt: context.now
+      };
+    }
+  },
+  {
+    version: 8,
+    description: "persist stable world seed for deterministic lazy chunk generation",
+    up(metadata, context) {
+      metadata.sourcesOfTruth = buildSourcesOfTruth(8);
+      metadata.worldSeed = String(metadata.worldSeed || createWorldSeed());
+      metadata.migrationState = {
+        runner: "worldMigrations",
+        repairSeparated: true,
+        lastMigratedAt: context.now
+      };
+    }
+  },
+  {
+    version: 9,
+    description: "persist explicit world dimensions in metadata for scalable chunk worlds",
+    up(metadata, context) {
+      metadata.sourcesOfTruth = buildSourcesOfTruth(9);
+      metadata.worldSeed = String(metadata.worldSeed || createWorldSeed());
+      metadata.worldWidth = Number.isFinite(Number(metadata.worldWidth))
+        ? Number(metadata.worldWidth)
+        : MAP_W;
+      metadata.worldHeight = Number.isFinite(Number(metadata.worldHeight))
+        ? Number(metadata.worldHeight)
+        : MAP_H;
       metadata.migrationState = {
         runner: "worldMigrations",
         repairSeparated: true,
@@ -234,7 +296,14 @@ function normalizeMetadataShape(existing, now, schemaVersion) {
     migrationState:
       existing?.migrationState && typeof existing.migrationState === "object"
         ? existing.migrationState
-        : null
+        : null,
+    worldSeed: String(existing?.worldSeed || "") || null,
+    worldWidth: Number.isFinite(Number(existing?.worldWidth))
+      ? Number(existing.worldWidth)
+      : MAP_W,
+    worldHeight: Number.isFinite(Number(existing?.worldHeight))
+      ? Number(existing.worldHeight)
+      : MAP_H
   };
 }
 
@@ -288,6 +357,16 @@ function migrateWorldMetadata(dataDir, { logger = null } = {}) {
     };
   }
 
+  if (!metadata.worldSeed) {
+    metadata.worldSeed = createWorldSeed();
+  }
+  if (!Number.isFinite(Number(metadata.worldWidth))) {
+    metadata.worldWidth = MAP_W;
+  }
+  if (!Number.isFinite(Number(metadata.worldHeight))) {
+    metadata.worldHeight = MAP_H;
+  }
+
   const shouldWrite =
     !existing ||
     appliedMigrations.length > 0 ||
@@ -295,7 +374,10 @@ function migrateWorldMetadata(dataDir, { logger = null } = {}) {
     !Array.isArray(existing?.migrationHistory) ||
     (metadata.schemaVersion >= 6 && !existing?.migrationState) ||
     !isPositiveNumber(existing?.createdAt) ||
-    !isPositiveNumber(existing?.updatedAt);
+    !isPositiveNumber(existing?.updatedAt) ||
+    !existing?.worldSeed ||
+    !Number.isFinite(Number(existing?.worldWidth)) ||
+    !Number.isFinite(Number(existing?.worldHeight));
 
   if (shouldWrite) {
     metadata.updatedAt = now;
@@ -321,5 +403,6 @@ module.exports = {
   readJsonFile,
   writeFileAtomic,
   writeJsonAtomic,
-  migrateWorldMetadata
+  migrateWorldMetadata,
+  createWorldSeed
 };

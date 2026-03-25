@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { SHOP_ITEMS } from "./constants.js";
 import {
+  getActiveBuildingWindows,
+  getOwnedBuildings,
+  getTeleportTargets
+} from "./buildingWindows.js";
+import {
   buyCrystal as sendBuyCrystal,
   collectAllBuildingMoney as sendCollectAllBuildingMoney,
   collectBuildingMoney as sendCollectBuildingMoney,
@@ -75,32 +80,9 @@ export function useBuildingUi({
   const updateBuildingWindows = useCallback(() => {
     const player = localPlayerRef.current;
     const me = usernameRef.current || "";
-    const nextOwnedBuildings = buildingsRef.current
-      .filter((building) => building.owner === me)
-      .map((building) => {
-        const interaction =
-          building.type === "storage"
-            ? building.entrance || null
-            : building.center || building.entrances?.[0] || null;
-        return {
-          id: building.id,
-          type: building.type,
-          hp: building.hp ?? 0,
-          maxHp: building.maxHp ?? 0,
-          inactive: Boolean(building.inactive),
-          balance: Math.max(0, Number(building.balance || 0)),
-          canCollectMoney: typeof building.balance === "number",
-          isSelectedRespawn:
-            building.type === "respawn" && building.id === respawnBuildingId,
-          interaction
-        };
-      })
-      .sort((a, b) => {
-        const typeCompare = String(a.type).localeCompare(String(b.type));
-        if (typeCompare !== 0) return typeCompare;
-        return String(a.id).localeCompare(String(b.id));
-      });
-    setOwnedBuildings(nextOwnedBuildings);
+    const buildings = buildingsRef.current;
+
+    setOwnedBuildings(getOwnedBuildings(buildings, me, respawnBuildingId));
 
     if (!player.ready) {
       setStorageOpen(false);
@@ -124,116 +106,34 @@ export function useBuildingUi({
       return;
     }
 
-    let nextStorage = null;
-    let nextShop = null;
-    let nextUpgrade = null;
-    let nextRespawn = null;
-    let nextTeleport = null;
+    const nextWindows = getActiveBuildingWindows(buildings, player, me);
+    const nextTeleportTargets = getTeleportTargets(buildings, nextWindows.teleport);
 
-    for (const building of buildingsRef.current) {
-      if (building.type === "storage" && building.entrance) {
-        if (
-          building.entrance.x === player.tx &&
-          building.entrance.y === player.ty
-        ) {
-          const owner = building.owner || "";
-          const isOwner = !owner || owner === me;
-          if ((building.inactive && owner === me) || (!building.inactive && isOwner)) {
-            nextStorage = building;
-          }
-        }
-      }
-
-      if (building.type === "shop" && building.center) {
-        if (building.center.x === player.tx && building.center.y === player.ty) {
-          const owner = building.owner || "";
-          if ((building.inactive && owner === me) || !building.inactive) {
-            nextShop = building;
-          }
-        }
-      }
-
-      if (building.type === "upgrade" && building.center) {
-        if (building.center.x === player.tx && building.center.y === player.ty) {
-          const owner = building.owner || "";
-          if ((building.inactive && owner === me) || !building.inactive) {
-            nextUpgrade = building;
-          }
-        }
-      }
-
-      if (building.type === "respawn" && building.center) {
-        if (building.center.x === player.tx && building.center.y === player.ty) {
-          const owner = building.owner || "";
-          if ((building.inactive && owner === me) || !building.inactive) {
-              nextRespawn = building;
-            }
-        }
-      }
-
-      if (building.type === "teleport" && building.center) {
-        if (building.center.x === player.tx && building.center.y === player.ty) {
-          const owner = building.owner || "";
-          if ((building.inactive && owner === me) || !building.inactive) {
-            nextTeleport = building;
-          }
-        }
-      }
-    }
-
-    const nextTeleportTargets = nextTeleport?.center
-      ? buildingsRef.current
-          .filter(
-            (building) =>
-              building.type === "teleport" &&
-              !building.inactive &&
-              building.center
-          )
-          .map((building) => {
-            const dx = building.center.x - nextTeleport.center.x;
-            const dy = building.center.y - nextTeleport.center.y;
-            const distance = Math.sqrt(dx * dx + dy * dy);
-            return {
-              id: building.id,
-              owner: building.owner || "",
-              center: building.center,
-              distance,
-              isCurrent: building.id === nextTeleport.id,
-              inRange: building.id !== nextTeleport.id && distance <= 1000
-            };
-          })
-          .sort((a, b) => {
-            if (a.isCurrent) return -1;
-            if (b.isCurrent) return 1;
-            return a.distance - b.distance || String(a.id).localeCompare(String(b.id));
-          })
-      : [];
-
-    setStorageBuilding(nextStorage);
-    setShopBuilding(nextShop);
-    setUpgradeBuilding(nextUpgrade);
-    setRespawnBuilding(nextRespawn);
-    setTeleportBuilding(nextTeleport);
-    setStorageOpen(Boolean(nextStorage));
-    setShopOpen(Boolean(nextShop));
-    setUpgradeOpen(Boolean(nextUpgrade));
-    setTeleportOpen(Boolean(nextTeleport));
-    if (nextRespawn && suppressRespawnAutoOpen) {
+    setStorageBuilding(nextWindows.storage);
+    setShopBuilding(nextWindows.shop);
+    setUpgradeBuilding(nextWindows.upgrade);
+    setRespawnBuilding(nextWindows.respawn);
+    setTeleportBuilding(nextWindows.teleport);
+    setStorageOpen(Boolean(nextWindows.storage));
+    setShopOpen(Boolean(nextWindows.shop));
+    setUpgradeOpen(Boolean(nextWindows.upgrade));
+    setTeleportOpen(Boolean(nextWindows.teleport));
+    if (nextWindows.respawn && suppressRespawnAutoOpen) {
       setRespawnOpen(false);
     } else {
-      setRespawnOpen(Boolean(nextRespawn));
+      setRespawnOpen(Boolean(nextWindows.respawn));
     }
     setTeleportTargets(nextTeleportTargets);
-    setStorageId(nextStorage?.id || null);
-    setStorageOwner(nextStorage?.owner || null);
-    setShopOwner(nextShop?.owner || null);
-    setUpgradeOwner(nextUpgrade?.owner || null);
-    setRespawnOwner(nextRespawn?.owner || null);
-    setTeleportOwner(nextTeleport?.owner || null);
-    if (!nextTeleport) {
+    setStorageId(nextWindows.storage?.id || null);
+    setStorageOwner(nextWindows.storage?.owner || null);
+    setShopOwner(nextWindows.shop?.owner || null);
+    setUpgradeOwner(nextWindows.upgrade?.owner || null);
+    setRespawnOwner(nextWindows.respawn?.owner || null);
+    setTeleportOwner(nextWindows.teleport?.owner || null);
+    if (!nextWindows.teleport) {
       setTeleportError("");
     }
-    if (!nextRespawn && suppressRespawnAutoOpen) {
+    if (!nextWindows.respawn && suppressRespawnAutoOpen) {
       setSuppressRespawnAutoOpen?.(false);
     }
   }, [
@@ -572,7 +472,3 @@ export function useBuildingUi({
     forceDeath
   };
 }
-
-
-
-

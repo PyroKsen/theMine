@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { clamp } from "./helpers.js";
 import {
+  DEFAULT_ITEMS,
+  mapIncomingItems,
+  normalizeSelectedItem,
+  sortItems,
+  useInventoryItem
+} from "./playerItems.js";
+import {
   dropAllCrystals,
   dropSelectedCrystals,
   isSocketOpen,
@@ -18,28 +25,6 @@ const EMPTY_CRYSTALS = {
   pink: 0,
   cyan: 0
 };
-
-const DEFAULT_ITEMS = [
-  { id: "medkit", name: "Medkit", count: 0 },
-  { id: "bomb", name: "Bomb", count: 0 },
-  { id: "plasmabomb", name: "Plasmabomb", count: 0 },
-  { id: "electrobomb", name: "Electrobomb", count: 0 },
-  { id: "storage", name: "Storage", count: 0 },
-  { id: "shop", name: "Shop", count: 0 },
-  { id: "respawn", name: "Respawn", count: 0 },
-  { id: "upgrade", name: "Upgrade", count: 0 },
-  { id: "teleport", name: "Teleport", count: 0 },
-  { id: "turret", name: "Turret", count: 0 },
-  { id: "clan_hall", name: "Clan Hall", count: 0 },
-  { id: "geopak_empty", name: "Geopak", count: 0 },
-  { id: "geopak_blue", name: "Geopak: Blue Living", count: 0 },
-  { id: "geopak_white", name: "Geopak: White Living", count: 0 },
-  { id: "geopak_pink", name: "Geopak: Pink Living", count: 0 },
-  { id: "geopak_red", name: "Geopak: Red Living", count: 0 },
-  { id: "geopak_cyan", name: "Geopak: Cyan Living", count: 0 },
-  { id: "geopak_rainbow", name: "Geopak: Rainbow Living", count: 0 },
-  { id: "geopak_hypno", name: "Geopak: Hypno Rock", count: 0 }
-];
 
 export function usePlayerUi({
   chatFocusRef,
@@ -66,18 +51,7 @@ export function usePlayerUi({
     selectedItemRef.current = selectedItemId;
   }, [selectedItemId]);
 
-  const sortedItems = useMemo(
-    () =>
-      itemInventory
-        .map((item, index) => ({ ...item, index }))
-        .sort((a, b) => {
-          const aHas = a.count > 0 ? 1 : 0;
-          const bHas = b.count > 0 ? 1 : 0;
-          if (aHas !== bHas) return bHas - aHas;
-          return a.index - b.index;
-        }),
-    [itemInventory]
-  );
+  const sortedItems = useMemo(() => sortItems(itemInventory), [itemInventory]);
 
   const dropTotal = useMemo(
     () =>
@@ -115,20 +89,10 @@ export function usePlayerUi({
   function applyItems(items) {
     let next = [];
     setItemInventory((prev) => {
-      const nameMap = new Map(prev.map((item) => [item.id, item.name]));
-      next = items.map((item) => ({
-        id: String(item.id || ""),
-        name: nameMap.get(String(item.id || "")) || String(item.name || ""),
-        count: Number(item.count || 0)
-      }));
+      next = mapIncomingItems(items, prev);
       return next;
     });
-    setSelectedItemId((prev) => {
-      if (!prev) return null;
-      const found = next.find((item) => item.id === prev);
-      if (!found || found.count <= 0) return null;
-      return prev;
-    });
+    setSelectedItemId((prev) => normalizeSelectedItem(prev, next));
   }
 
   function useSelectedItem() {
@@ -136,25 +100,14 @@ export function usePlayerUi({
     if (!id) return;
     const socket = socketRef.current;
     if (!isSocketOpen(socket)) return;
-    if (id === "bomb" || id === "plasmabomb" || id === "electrobomb") {
-      const placement = placementRef.current;
-      if (!placement.valid) return;
-      placeBomb(socket, placement.x, placement.y, id);
-      return;
-    }
-    if (
-      id === "storage" ||
-      id === "shop" ||
-      id === "respawn" ||
-      id === "upgrade" ||
-      id === "teleport"
-    ) {
-      const placement = placementRef.current;
-      if (!placement.valid) return;
-      placeBuilding(socket, id, placement.x, placement.y);
-      return;
-    }
-    sendUseItem(socket, id);
+    useInventoryItem({
+      id,
+      socket,
+      placement: placementRef.current,
+      placeBomb,
+      placeBuilding,
+      sendUseItem
+    });
   }
 
   function submitChat(event) {

@@ -1,6 +1,4 @@
 const {
-  MAP_W,
-  MAP_H,
   TILE_TYPES,
   BUILDING_TYPES,
   BOMB_TYPES,
@@ -11,6 +9,7 @@ const {
 function createBombManager({ mapStore, players, broadcast, applyDamageToPlayer }) {
   if (!mapStore) throw new Error("mapStore is required");
   const { getTile, getBuilding, setTile, deleteTileHp } = mapStore;
+  const { width: MAP_W, height: MAP_H } = mapStore.getDimensions();
 
   const bombs = new Map();
   const bombByTile = new Map();
@@ -167,6 +166,8 @@ function createBombManager({ mapStore, players, broadcast, applyDamageToPlayer }
 module.exports = {
   createBombManager
 };
+
+
 
 
 

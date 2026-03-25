@@ -413,15 +413,21 @@ function runWorldMetadataMigrationTest() {
 
     const result = migrateWorldMetadata(dataDir);
     assert.strictEqual(result.fromVersion, 5);
-    assert.strictEqual(result.toVersion, 6);
-    assert.strictEqual(result.appliedMigrations.length, 1);
+    assert.strictEqual(result.toVersion, 9);
+    assert.strictEqual(result.appliedMigrations.length, 4);
     assert.strictEqual(result.appliedMigrations[0].version, 6);
+    assert.strictEqual(result.appliedMigrations[1].version, 7);
+    assert.strictEqual(result.appliedMigrations[2].version, 8);
+    assert.strictEqual(result.appliedMigrations[3].version, 9);
     assert.strictEqual(result.metadata.migrationState.repairSeparated, true);
 
     const persisted = readJsonFile(path.join(dataDir, "world_meta.json"), null);
-    assert.strictEqual(persisted.schemaVersion, 6);
+    assert.strictEqual(persisted.schemaVersion, 9);
     assert.ok(Array.isArray(persisted.migrationHistory));
-    assert.strictEqual(persisted.migrationHistory.at(-1).version, 6);
+    assert.strictEqual(persisted.migrationHistory.at(-1).version, 9);
+    assert.ok(typeof persisted.worldSeed === "string" && persisted.worldSeed.length > 0);
+    assert.ok(Number.isFinite(Number(persisted.worldWidth)) && Number(persisted.worldWidth) > 0);
+    assert.ok(Number.isFinite(Number(persisted.worldHeight)) && Number(persisted.worldHeight) > 0);
   } finally {
     removeDirSafe(dataDir);
   }
@@ -450,4 +456,11 @@ try {
   console.error("[fail] recovery smoke tests", error);
   process.exit(1);
 }
+
+
+
+
+
+
+
 

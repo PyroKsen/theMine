@@ -1,4 +1,3 @@
-const { palettes } = require("./palettes");
 const { layeredNoise, hashNoise, chooseWinningType } = require("./noise");
 
 function createFillLogic({ TILE_TYPES, rotateSectorPoint }) {
@@ -15,26 +14,70 @@ function createFillLogic({ TILE_TYPES, rotateSectorPoint }) {
     return broad * 0.18 + medium * 0.22 + streak * 0.28 + fine * 0.18 + grit * 0.14;
   }
 
+  function patternFields(sector, x, y, seedBase, index) {
+    const localA = rotateSectorPoint(sector, x, y, 1.9, index % 2 === 0);
+    const localB = rotateSectorPoint(sector, x + 41, y - 27, 3.6, index % 2 !== 0);
+    const localC = rotateSectorPoint(sector, x - 19, y + 33, 6.2, false);
+    const pattern = sector.pool?.pattern || "bands";
+
+    if (pattern === "patches") {
+      return {
+        dominant: layeredNoise(localA.x * 0.035, localA.y * 0.035, seedBase + 5),
+        support: layeredNoise(localB.x * 0.062, localB.y * 0.062, seedBase + 23),
+        accent: layeredNoise(localC.x * 0.11, localC.y * 0.11, seedBase + 41)
+      };
+    }
+
+    if (pattern === "veins") {
+      return {
+        dominant: layeredNoise(localA.x * 0.024, localA.y * 0.128, seedBase + 5),
+        support: layeredNoise(localB.x * 0.021, localB.y * 0.175, seedBase + 23),
+        accent: layeredNoise(localC.x * 0.095, localC.y * 0.21, seedBase + 41)
+      };
+    }
+
+    if (pattern === "scatter") {
+      return {
+        dominant: hashNoise(Math.floor(localA.x * 1.8), Math.floor(localA.y * 1.8), seedBase + 5),
+        support: layeredNoise(localB.x * 0.14, localB.y * 0.14, seedBase + 23),
+        accent: hashNoise(Math.floor(localC.x * 2.4), Math.floor(localC.y * 2.4), seedBase + 41)
+      };
+    }
+
+    return {
+      dominant: layeredNoise(localA.x * 0.02, localA.y * 0.14, seedBase + 5),
+      support: layeredNoise(localB.x * 0.038, localB.y * 0.16, seedBase + 23),
+      accent: layeredNoise(localC.x * 0.11, localC.y * 0.23, seedBase + 41)
+    };
+  }
+
   function dirtyFillType(sector, x, y) {
-    const palette = palettes[sector.paletteKey] || palettes.starter;
+    const pool = sector.pool;
+    const materials = pool?.fillEntries?.length ? pool.fillEntries : [{ type: TILE_TYPES.rock, percent: 100 }];
     const dx = x - sector.x;
     const dy = y - sector.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
     const centerBias = Math.max(0, 1 - dist / 280);
-    const entries = palette.materials.map((entry, index) => {
+    const entries = materials.map((entry, index) => {
       const seedBase = sector.gx * 131 + sector.gy * 97 + index * 41;
       const fieldA = dirtyField(sector, x, y, seedBase + 11);
       const fieldB = dirtyField(sector, x + 19, y - 23, seedBase + 29);
       const fieldC = dirtyField(sector, x - 37, y + 31, seedBase + 53);
       const local = rotateSectorPoint(sector, x, y, 5.1, index % 2 === 0);
       const contamination = layeredNoise(local.x * 0.19, local.y * 0.19, seedBase + 71);
-      let weight = entry.weight * 0.55;
-      weight += fieldA * 0.85;
-      weight += fieldB * 0.65;
-      weight += fieldC * 0.55;
-      weight += contamination * 0.35;
-      if (entry.type === palette.primary) {
+      const pattern = patternFields(sector, x, y, seedBase + 101, index);
+      let weight = (entry.percent / 100) * 0.95;
+      weight += fieldA * 0.45;
+      weight += fieldB * 0.3;
+      weight += fieldC * 0.24;
+      weight += contamination * 0.16;
+      weight += pattern.dominant * 0.72;
+      weight += pattern.support * 0.48;
+      weight += pattern.accent * 0.2;
+      if (entry.type === pool.primaryType) {
         weight += centerBias * 0.35;
+      } else if (entry.type === TILE_TYPES.empty) {
+        weight += (1 - centerBias) * 0.24;
       } else {
         weight += (1 - centerBias) * 0.18;
       }

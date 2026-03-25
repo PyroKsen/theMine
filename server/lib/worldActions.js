@@ -154,16 +154,20 @@ function createWorldActions({
   }
 
   function syncDropBoxesOnMap() {
-    const liveDropBoxes = new Set(dropBoxes.keys());
     let restoredTiles = 0;
     let clearedTiles = 0;
     let removedEntries = purgedInvalidRows;
     let terrainConflicts = 0;
     purgedInvalidRows = 0;
 
-    for (const [key, record] of dropBoxes) {
+    for (const [key, record] of Array.from(dropBoxes.entries())) {
       const { x, y } = record;
       if (getBuilding(x, y) !== BUILDING_TYPES.none) {
+        if (getTile(x, y) === TILE_TYPES.dropBox) {
+          setTile(x, y, TILE_TYPES.empty);
+          deleteTileHp(x, y);
+          clearedTiles += 1;
+        }
         dropBoxes.delete(key);
         markDropBoxDeleted(x, y);
         removedEntries += 1;
@@ -177,28 +181,11 @@ function createWorldActions({
         terrainConflicts += 1;
         continue;
       }
-      if (getTile(x, y) !== TILE_TYPES.dropBox) {
+      if (tileType !== TILE_TYPES.dropBox) {
         setTile(x, y, TILE_TYPES.dropBox);
         restoredTiles += 1;
       }
       setTileHp(x, y, 1);
-    }
-
-    if (removedEntries > 0) {
-      liveDropBoxes.clear();
-      for (const key of dropBoxes.keys()) {
-        liveDropBoxes.add(key);
-      }
-    }
-
-    for (let y = 0; y < MAP_H; y += 1) {
-      for (let x = 0; x < MAP_W; x += 1) {
-        if (getTile(x, y) !== TILE_TYPES.dropBox) continue;
-        if (liveDropBoxes.has(dropBoxKey(x, y))) continue;
-        setTile(x, y, TILE_TYPES.empty);
-        deleteTileHp(x, y);
-        clearedTiles += 1;
-      }
     }
 
     return {
@@ -485,6 +472,8 @@ function createWorldActions({
 module.exports = {
   createWorldActions
 };
+
+
 
 
 

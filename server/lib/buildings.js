@@ -1,6 +1,4 @@
 const {
-  MAP_W,
-  MAP_H,
   TILE_TYPES,
   BUILDING_TYPES,
   BUILDING_MAX_HP,
@@ -152,7 +150,8 @@ function createBuildingManager({
   if (!buildingDb?.db) throw new Error("buildingDb is required");
   if (!mapStore) throw new Error("mapStore is required");
 
-  const { getTile, getBuilding, setBuilding, replaceBuildingLayer } = mapStore;
+  const { getTile, getBuilding, setBuilding, rebuildBuildingLayer, replaceBuildingLayer } = mapStore;
+  const { width: MAP_W, height: MAP_H } = mapStore.getDimensions();
   const {
     db,
     stmtCountBuildings,
@@ -359,9 +358,10 @@ function createBuildingManager({
   }
 
   function syncBuildingLayer() {
-    const expected = new Uint8Array(MAP_W * MAP_H);
+    const entries = [];
     let invalidTileCount = 0;
     let overlapCount = 0;
+    const occupied = new Set();
     for (const building of buildings) {
       const typeValue = BUILDING_TYPES[building?.type] ?? BUILDING_TYPES.none;
       if (typeValue === BUILDING_TYPES.none) continue;
@@ -372,13 +372,14 @@ function createBuildingManager({
           invalidTileCount += 1;
           continue;
         }
-        const index = y * MAP_W + x;
-        if (expected[index] !== BUILDING_TYPES.none) overlapCount += 1;
-        expected[index] = typeValue;
+        const key = tileKey(x, y);
+        if (occupied.has(key)) overlapCount += 1;
+        occupied.add(key);
+        entries.push({ x, y, value: typeValue });
       }
     }
     return {
-      repairedCells: replaceBuildingLayer(expected),
+      repairedCells: rebuildBuildingLayer(entries),
       invalidTileCount,
       overlapCount,
       buildingCount: buildings.length
@@ -846,6 +847,9 @@ function createBuildingManager({
 module.exports = {
   createBuildingManager
 };
+
+
+
 
 
 

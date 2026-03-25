@@ -12,6 +12,7 @@ function attachRealtimeServer({
   playerService,
   skillHelpers,
   exploration,
+  activeChunks,
   slotHelpers,
   worldActions,
   isWalkable
@@ -119,6 +120,11 @@ function attachRealtimeServer({
     exploredPayload,
     updateExplored
   } = exploration;
+  const {
+    chunkKey: activeChunkKey,
+    forEachActiveChunk,
+    getActiveChunkKeys
+  } = activeChunks;
   const {
     SKILL_SLOT_COUNT,
     normalizeSkillSlots,
@@ -253,19 +259,38 @@ function attachRealtimeServer({
 
   function ensureLiveCrystalGrowthTimers(now = Date.now()) {
     const seen = new Set();
-    for (let y = 0; y < MAP_H; y += 1) {
-      for (let x = 0; x < MAP_W; x += 1) {
-        const type = getTile(x, y);
-        if (!isLivingCrystal(type)) continue;
-        const key = `${x},${y}`;
-        seen.add(key);
-        if (!liveCrystalGrowthDue.has(key)) {
-          liveCrystalGrowthDue.set(key, now + LIVE_CRYSTAL_GROWTH_MS);
+    const activeKeys = getActiveChunkKeys(players, CHUNK_SIZE);
+    forEachActiveChunk(
+      players,
+      (cx, cy) => {
+        const chunk = encodeMapChunk(cx, cy, CHUNK_SIZE);
+        if (!chunk) return;
+        const startX = cx * CHUNK_SIZE;
+        const startY = cy * CHUNK_SIZE;
+        for (let y = 0; y < chunk.h; y += 1) {
+          for (let x = 0; x < chunk.w; x += 1) {
+            const type = chunk.data[y * chunk.w + x];
+            if (!isLivingCrystal(type)) continue;
+            const tx = startX + x;
+            const ty = startY + y;
+            const key = `${tx},${ty}`;
+            seen.add(key);
+            if (!liveCrystalGrowthDue.has(key)) {
+              liveCrystalGrowthDue.set(key, now + LIVE_CRYSTAL_GROWTH_MS);
+            }
+          }
         }
-      }
-    }
+      },
+      CHUNK_SIZE
+    );
     for (const key of Array.from(liveCrystalGrowthDue.keys())) {
-      if (!seen.has(key)) {
+      const [x, y] = key.split(",").map((value) => Number(value));
+      if (!Number.isInteger(x) || !Number.isInteger(y)) {
+        liveCrystalGrowthDue.delete(key);
+        continue;
+      }
+      const chunkKey = activeChunkKey(Math.floor(x / CHUNK_SIZE), Math.floor(y / CHUNK_SIZE));
+      if (activeKeys.has(chunkKey) && !seen.has(key)) {
         liveCrystalGrowthDue.delete(key);
       }
     }
@@ -410,19 +435,34 @@ function attachRealtimeServer({
   }
 
   function runFallingTilesStep() {
-    for (let y = MAP_H - 2; y >= 0; y -= 1) {
-      for (let x = 0; x < MAP_W; x += 1) {
-        const type = getTile(x, y);
-        if (!isFallingTile(type)) continue;
-        if (moveFallingTile(x, y, x, y + 1)) {
-          continue;
-        }
-        const belowType = getTile(x, y + 1);
-        if (!isFallingTile(belowType)) continue;
-        const directions = Math.random() < 0.5 ? [-1, 1] : [1, -1];
-        for (const dx of directions) {
-          if (moveFallingTile(x, y, x + dx, y + 1)) {
-            break;
+    const activeChunksToProcess = [];
+    forEachActiveChunk(
+      players,
+      (cx, cy) => {
+        activeChunksToProcess.push({ cx, cy });
+      },
+      CHUNK_SIZE
+    );
+    activeChunksToProcess.sort((a, b) => (b.cy - a.cy) || (a.cx - b.cx));
+    for (const { cx, cy } of activeChunksToProcess) {
+      const startX = cx * CHUNK_SIZE;
+      const startY = cy * CHUNK_SIZE;
+      const maxY = Math.min(MAP_H - 2, startY + CHUNK_SIZE - 1);
+      const maxX = Math.min(MAP_W - 1, startX + CHUNK_SIZE - 1);
+      for (let y = maxY; y >= startY; y -= 1) {
+        for (let x = startX; x <= maxX; x += 1) {
+          const type = getTile(x, y);
+          if (!isFallingTile(type)) continue;
+          if (moveFallingTile(x, y, x, y + 1)) {
+            continue;
+          }
+          const belowType = getTile(x, y + 1);
+          if (!isFallingTile(belowType)) continue;
+          const directions = Math.random() < 0.5 ? [-1, 1] : [1, -1];
+          for (const dx of directions) {
+            if (moveFallingTile(x, y, x + dx, y + 1)) {
+              break;
+            }
           }
         }
       }
@@ -1217,6 +1257,14 @@ function attachRealtimeServer({
 module.exports = {
   attachRealtimeServer
 };
+
+
+
+
+
+
+
+
 
 
 

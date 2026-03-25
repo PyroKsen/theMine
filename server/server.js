@@ -15,8 +15,6 @@ const {
   TELEPORT_RANGE,
   LIVE_CRYSTAL_GROWTH_MS,
   BUILDING_TYPES,
-  MAP_W,
-  MAP_H,
   TILE_SIZE,
   CHUNK_SIZE,
   TILE_TYPES,
@@ -41,14 +39,8 @@ const { createDb } = require("./lib/db");
 const { createBuildingManager } = require("./lib/buildings");
 const { createBombManager } = require("./lib/bombs");
 const { createPlayerService } = require("./lib/players");
-const {
-  chunkKey,
-  parseExplored,
-  encodeExplored,
-  chunkIntersectsView,
-  exploredPayload,
-  updateExplored
-} = require("./lib/exploration");
+const { createExplorationHelpers } = require("./lib/exploration");
+const { createActiveChunkUtils } = require("./lib/activeChunks");
 const {
   SKILL_SLOT_COUNT,
   EMPTY_SKILL_SLOTS,
@@ -71,9 +63,28 @@ fs.mkdirSync(dataDir, { recursive: true });
 
 const mapStore = createMapStore(dataDir);
 const { getTile, getBuilding, flushDirty } = mapStore;
+const { width: worldWidth, height: worldHeight, chunkSize: worldChunkSize } = mapStore.getDimensions();
+const exploration = createExplorationHelpers({
+  mapWidth: worldWidth,
+  mapHeight: worldHeight,
+  chunkSize: worldChunkSize
+});
+const activeChunks = createActiveChunkUtils({
+  mapWidth: worldWidth,
+  mapHeight: worldHeight,
+  chunkSize: worldChunkSize
+});
+const {
+  chunkKey,
+  parseExplored,
+  encodeExplored,
+  chunkIntersectsView,
+  exploredPayload,
+  updateExplored
+} = exploration;
 
 function isWalkable(x, y) {
-  if (x < 0 || x >= MAP_W || y < 0 || y >= MAP_H) return false;
+  if (x < 0 || x >= worldWidth || y < 0 || y >= worldHeight) return false;
   if (getTile(x, y) !== TILE_TYPES.empty) return false;
   return getBuilding(x, y) === BUILDING_TYPES.none;
 }
@@ -113,8 +124,8 @@ if (dbMigrationResult.appliedMigrations.length > 0) {
 }
 
 const playerService = createPlayerService({
-  mapWidth: MAP_W,
-  mapHeight: MAP_H,
+  mapWidth: worldWidth,
+  mapHeight: worldHeight,
   isWalkable,
   getSkillConfig,
   getOverloadPercent,
@@ -179,8 +190,8 @@ const worldActions = createWorldActions({
   dropBoxDb,
   mapStore,
   config: {
-      MAP_W,
-      MAP_H,
+      MAP_W: worldWidth,
+      MAP_H: worldHeight,
       BASE_SPAWN_TX,
       BASE_SPAWN_TY,
     TILE_TYPES,
@@ -290,8 +301,8 @@ attachRealtimeServer({
     CRYSTAL_PRICES,
     BOMB_ITEMS,
     BUILDING_ITEMS,
-    MAP_W,
-    MAP_H,
+    MAP_W: worldWidth,
+    MAP_H: worldHeight,
     TILE_SIZE,
     CHUNK_SIZE,
     TELEPORT_PRICE,
@@ -326,14 +337,8 @@ attachRealtimeServer({
     getMiningDamage,
     getMaxDepth
   },
-  exploration: {
-    chunkKey,
-    parseExplored,
-    encodeExplored,
-    chunkIntersectsView,
-    exploredPayload,
-    updateExplored
-  },
+  exploration,
+  activeChunks,
   slotHelpers: {
     SKILL_SLOT_COUNT,
     normalizeSkillSlots,
@@ -348,6 +353,8 @@ attachRealtimeServer({
 server.listen(PORT, () => {
   console.log(`Server listening on ws://localhost:${PORT}`);
 });
+
+
 
 
 

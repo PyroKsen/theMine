@@ -2,7 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const zlib = require("zlib");
 const { createMapStore } = require("../lib/mapStore");
-const { MAP_W, MAP_H, TILE_TYPES } = require("../lib/config");
+const { TILE_TYPES } = require("../lib/config");
 
 const COLOR_BY_TILE = new Map([
   [TILE_TYPES.empty, [11, 16, 22]],
@@ -94,6 +94,20 @@ function encodePng(width, height, rgba) {
   ]);
 }
 
+function paintScaledPixel(rgba, width, scale, x, y, color) {
+  for (let sy = 0; sy < scale; sy += 1) {
+    for (let sx = 0; sx < scale; sx += 1) {
+      const px = x * scale + sx;
+      const py = y * scale + sy;
+      const idx = (py * width + px) * 4;
+      rgba[idx] = color[0];
+      rgba[idx + 1] = color[1];
+      rgba[idx + 2] = color[2];
+      rgba[idx + 3] = 255;
+    }
+  }
+}
+
 function main() {
   const dataDir = path.resolve(__dirname, "..", "data");
   const outArg = process.argv[2];
@@ -104,27 +118,30 @@ function main() {
     : path.join(dataDir, "world-map.png");
 
   const mapStore = createMapStore(dataDir);
-  const width = MAP_W * scale;
-  const height = MAP_H * scale;
+  const { width: worldWidth, height: worldHeight, chunkSize } = mapStore.getDimensions();
+  const width = worldWidth * scale;
+  const height = worldHeight * scale;
   const rgba = Buffer.alloc(width * height * 4);
+  const maxCx = Math.ceil(worldWidth / chunkSize);
+  const maxCy = Math.ceil(worldHeight / chunkSize);
 
-  for (let y = 0; y < MAP_H; y += 1) {
-    for (let x = 0; x < MAP_W; x += 1) {
-      const tileType = mapStore.getTile(x, y);
-      const building = mapStore.getBuilding(x, y);
-      let color = COLOR_BY_TILE.get(tileType) || [255, 0, 255];
-      if (building) {
-        color = darken([200, 206, 217], 0.92);
-      }
-      for (let sy = 0; sy < scale; sy += 1) {
-        for (let sx = 0; sx < scale; sx += 1) {
-          const px = x * scale + sx;
-          const py = y * scale + sy;
-          const idx = (py * width + px) * 4;
-          rgba[idx] = color[0];
-          rgba[idx + 1] = color[1];
-          rgba[idx + 2] = color[2];
-          rgba[idx + 3] = 255;
+  for (let cy = 0; cy < maxCy; cy += 1) {
+    for (let cx = 0; cx < maxCx; cx += 1) {
+      const terrainChunk = mapStore.getOrCreateTerrainChunk(cx, cy);
+      const buildingChunk = mapStore.getOrCreateBuildingChunk(cx, cy);
+      if (!terrainChunk || !buildingChunk) continue;
+      const startX = cx * chunkSize;
+      const startY = cy * chunkSize;
+      for (let y = 0; y < terrainChunk.h; y += 1) {
+        for (let x = 0; x < terrainChunk.w; x += 1) {
+          const idx = y * terrainChunk.w + x;
+          const tileType = terrainChunk.data[idx];
+          const building = buildingChunk.data[idx];
+          let color = COLOR_BY_TILE.get(tileType) || [255, 0, 255];
+          if (building) {
+            color = darken([200, 206, 217], 0.92);
+          }
+          paintScaledPixel(rgba, width, scale, startX + x, startY + y, color);
         }
       }
     }
