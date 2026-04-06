@@ -50,6 +50,7 @@ function createSectorPool(definition) {
   return {
     ...definition,
     pattern: definition.pattern || "bands",
+    patternStrength: Number.isFinite(Number(definition.patternStrength)) ? Number(definition.patternStrength) : 1,
     fillEntries: normalized.entries,
     primaryType: normalized.primaryType,
     shapeWeights: {
@@ -70,6 +71,7 @@ const sectorPools = [
     depthMax: 450,
     weight: 38,
     pattern: "bands",
+    patternStrength: 0.85,
     fill: {
       rock: 82,
       crystalGreen: 6,
@@ -87,6 +89,7 @@ const sectorPools = [
     depthMax: 600,
     weight: 16,
     pattern: "scatter",
+    patternStrength: 1.2,
     fill: {
       sand: 64,
       rock: 17,
@@ -104,6 +107,7 @@ const sectorPools = [
     depthMax: 1200,
     weight: 24,
     pattern: "bands",
+    patternStrength: 1,
     fill: {
       semiMagneticRock: 58,
       rock: 10,
@@ -121,6 +125,7 @@ const sectorPools = [
     depthMax: 2200,
     weight: 22,
     pattern: "veins",
+    patternStrength: 1.25,
     fill: {
       reinforcedRock: 42,
       ironRock: 20,
@@ -139,6 +144,7 @@ const sectorPools = [
     depthMax: 2600,
     weight: 22,
     pattern: "patches",
+    patternStrength: 1.15,
     fill: {
       acidRock: 40,
       slimeRock: 16,
@@ -157,6 +163,7 @@ const sectorPools = [
     depthMax: 2600,
     weight: 18,
     pattern: "patches",
+    patternStrength: 1.35,
     fill: {
       crystalPink: 18,
       crystalCyan: 18,
@@ -175,6 +182,7 @@ const sectorPools = [
     depthMax: 4000,
     weight: 14,
     pattern: "veins",
+    patternStrength: 1.45,
     fill: {
       ironRock: 26,
       steelRock: 24,
@@ -194,6 +202,7 @@ const sectorPools = [
     depthMax: 4000,
     weight: 12,
     pattern: "scatter",
+    patternStrength: 1.3,
     fill: {
       corrosiveRock: 18,
       radioactiveRock: 16,
@@ -272,3 +281,5 @@ module.exports = {
   pickSectorSize,
   getSizeRadius
 };
+
+

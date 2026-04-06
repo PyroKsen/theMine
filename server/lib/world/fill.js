@@ -19,35 +19,36 @@ function createFillLogic({ TILE_TYPES, rotateSectorPoint }) {
     const localB = rotateSectorPoint(sector, x + 41, y - 27, 3.6, index % 2 !== 0);
     const localC = rotateSectorPoint(sector, x - 19, y + 33, 6.2, false);
     const pattern = sector.pool?.pattern || "bands";
+    const strength = Math.max(0.35, Number(sector.pool?.patternStrength) || 1);
 
     if (pattern === "patches") {
       return {
-        dominant: layeredNoise(localA.x * 0.035, localA.y * 0.035, seedBase + 5),
-        support: layeredNoise(localB.x * 0.062, localB.y * 0.062, seedBase + 23),
-        accent: layeredNoise(localC.x * 0.11, localC.y * 0.11, seedBase + 41)
+        dominant: layeredNoise(localA.x * 0.035, localA.y * 0.035, seedBase + 5) * strength,
+        support: layeredNoise(localB.x * 0.062, localB.y * 0.062, seedBase + 23) * strength,
+        accent: layeredNoise(localC.x * 0.11, localC.y * 0.11, seedBase + 41) * strength
       };
     }
 
     if (pattern === "veins") {
       return {
-        dominant: layeredNoise(localA.x * 0.024, localA.y * 0.128, seedBase + 5),
-        support: layeredNoise(localB.x * 0.021, localB.y * 0.175, seedBase + 23),
-        accent: layeredNoise(localC.x * 0.095, localC.y * 0.21, seedBase + 41)
+        dominant: layeredNoise(localA.x * 0.024, localA.y * 0.128, seedBase + 5) * strength,
+        support: layeredNoise(localB.x * 0.021, localB.y * 0.175, seedBase + 23) * strength,
+        accent: layeredNoise(localC.x * 0.095, localC.y * 0.21, seedBase + 41) * strength
       };
     }
 
     if (pattern === "scatter") {
       return {
-        dominant: hashNoise(Math.floor(localA.x * 1.8), Math.floor(localA.y * 1.8), seedBase + 5),
-        support: layeredNoise(localB.x * 0.14, localB.y * 0.14, seedBase + 23),
-        accent: hashNoise(Math.floor(localC.x * 2.4), Math.floor(localC.y * 2.4), seedBase + 41)
+        dominant: hashNoise(Math.floor(localA.x * 1.8), Math.floor(localA.y * 1.8), seedBase + 5) * strength,
+        support: layeredNoise(localB.x * 0.14, localB.y * 0.14, seedBase + 23) * strength,
+        accent: hashNoise(Math.floor(localC.x * 2.4), Math.floor(localC.y * 2.4), seedBase + 41) * strength
       };
     }
 
     return {
-      dominant: layeredNoise(localA.x * 0.02, localA.y * 0.14, seedBase + 5),
-      support: layeredNoise(localB.x * 0.038, localB.y * 0.16, seedBase + 23),
-      accent: layeredNoise(localC.x * 0.11, localC.y * 0.23, seedBase + 41)
+      dominant: layeredNoise(localA.x * 0.02, localA.y * 0.14, seedBase + 5) * strength,
+      support: layeredNoise(localB.x * 0.038, localB.y * 0.16, seedBase + 23) * strength,
+      accent: layeredNoise(localC.x * 0.11, localC.y * 0.23, seedBase + 41) * strength
     };
   }
 
@@ -95,3 +96,5 @@ function createFillLogic({ TILE_TYPES, rotateSectorPoint }) {
 module.exports = {
   createFillLogic
 };
+
+
